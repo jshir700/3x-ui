@@ -16,6 +16,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+var subscriptionService service.SubscriptionService
+
 // InboundController handles HTTP requests related to Xray inbounds management.
 type InboundController struct {
 	inboundService service.InboundService
@@ -68,7 +70,10 @@ func (a *InboundController) initRouter(g *gin.RouterGroup) {
 	g.GET("/getClientLinks/:id/:email", a.getClientLinks)
 
 	g.POST("/add", a.addInbound)
+	g.GET("/checkSubscriptions/:id", a.checkInboundSubscriptions)
+	g.GET("/checkClientSubscriptions/:inboundId/:clientId", a.checkClientSubscriptions)
 	g.POST("/del/:id", a.delInbound)
+	g.POST("/forceDel/:id", a.forceDelInbound)
 	g.POST("/update/:id", a.updateInbound)
 	g.POST("/setEnable/:id", a.setInboundEnable)
 	g.POST("/clientIps/:email", a.getClientIps)
@@ -76,8 +81,10 @@ func (a *InboundController) initRouter(g *gin.RouterGroup) {
 	g.POST("/addClient", a.addInboundClient)
 	g.POST("/:id/copyClients", a.copyInboundClients)
 	g.POST("/:id/delClient/:clientId", a.delInboundClient)
+	g.POST("/:id/forceDelClient/:clientId", a.forceDelInboundClient)
 	g.POST("/updateClient/:clientId", a.updateInboundClient)
 	g.POST("/:id/resetTraffic", a.resetInboundTraffic)
+	g.POST("/reorder", a.reorderInbounds)
 	g.POST("/:id/resetClientTraffic/:email", a.resetClientTraffic)
 	g.POST("/resetAllTraffics", a.resetAllTraffics)
 	g.POST("/resetAllClientTraffics/:id", a.resetAllClientTraffics)
@@ -143,6 +150,23 @@ func (a *InboundController) getClientTrafficsById(c *gin.Context) {
 	jsonObj(c, clientTraffics, nil)
 }
 
+// reorderInbounds receives an ordered list of inbound IDs and updates
+// their sort_order so the list display follows the user's manual order.
+func (a *InboundController) reorderInbounds(c *gin.Context) {
+	var body struct {
+		Ids []int `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		jsonMsg(c, "Invalid request data", err)
+		return
+	}
+	if err := a.inboundService.ReorderInbounds(body.Ids); err != nil {
+		jsonMsg(c, "Reorder failed", err)
+		return
+	}
+	jsonMsg(c, "", nil)
+}
+
 // addInbound creates a new inbound configuration.
 func (a *InboundController) addInbound(c *gin.Context) {
 	inbound := &model.Inbound{}
@@ -184,11 +208,98 @@ func (a *InboundController) addInbound(c *gin.Context) {
 	a.broadcastInboundsUpdate(user.Id)
 }
 
+// checkClientSubscriptions returns subscriptions that reference a specific inbound+client pair.
+func (a *InboundController) checkClientSubscriptions(c *gin.Context) {
+	inboundId, err1 := strconv.Atoi(c.Param("inboundId"))
+	clientId, err2 := strconv.Atoi(c.Param("clientId"))
+	if err1 != nil || err2 != nil {
+		jsonMsg(c, I18nWeb(c, "get"), fmt.Errorf("invalid param"))
+		return
+	}
+	affected, toBeDeleted, err := subscriptionService.CheckClientSubscriptions(inboundId, clientId)
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	type subInfo struct {
+		Id     int    `json:"id"`
+		SubId  string `json:"subId"`
+		Remark string `json:"remark"`
+		Title  string `json:"title"`
+	}
+	mapSubs := func(subs []*model.Subscription) []subInfo {
+		out := make([]subInfo, len(subs))
+		for i, s := range subs {
+			out[i] = subInfo{Id: s.Id, SubId: s.SubId, Remark: s.Remark, Title: s.Title}
+		}
+		return out
+	}
+	jsonObj(c, gin.H{
+		"affected":    mapSubs(affected),
+		"toBeDeleted": mapSubs(toBeDeleted),
+	}, nil)
+}
+
 // delInbound deletes an inbound configuration by its ID.
+func (a *InboundController) checkInboundSubscriptions(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "get"), err)
+		return
+	}
+	subs, err := subscriptionService.GetByInboundId(id)
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	type subInfo struct {
+		Id       int    `json:"id"`
+		SubId    string `json:"subId"`
+		Remark   string `json:"remark"`
+		Title    string `json:"title"`
+		OnlyOne  bool   `json:"onlyOne"` // subscription only contains this inbound
+	}
+	result := make([]subInfo, 0)
+	for _, sub := range subs {
+		ids := parseCsvInboundIds(sub.InboundIds)
+		result = append(result, subInfo{
+			Id:      sub.Id,
+			SubId:   sub.SubId,
+			Remark:  sub.Remark,
+			Title:   sub.Title,
+			OnlyOne: len(ids) == 1,
+		})
+	}
+	jsonObj(c, result, nil)
+}
+
 func (a *InboundController) delInbound(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.inboundDeleteSuccess"), err)
+		return
+	}
+	subs, _ := subscriptionService.GetByInboundId(id)
+	if len(subs) > 0 {
+		type subInfo struct {
+			Id      int    `json:"id"`
+			SubId   string `json:"subId"`
+			Remark  string `json:"remark"`
+			OnlyOne bool   `json:"onlyOne"`
+		}
+		info := make([]subInfo, 0)
+		for _, sub := range subs {
+			ids := parseCsvInboundIds(sub.InboundIds)
+			info = append(info, subInfo{
+				Id:      sub.Id,
+				SubId:   sub.SubId,
+				Remark:  sub.Remark,
+				OnlyOne: len(ids) == 1,
+			})
+		}
+		jsonMsgObj(c, I18nWeb(c, "pages.inbounds.toasts.inboundDeleteHasSubscriptions"), gin.H{
+			"subscriptions": info,
+		}, nil)
 		return
 	}
 	needRestart, err := a.inboundService.DelInbound(id)
@@ -202,6 +313,43 @@ func (a *InboundController) delInbound(c *gin.Context) {
 	}
 	user := session.GetLoginUser(c)
 	a.broadcastInboundsUpdate(user.Id)
+}
+
+func (a *InboundController) forceDelInbound(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.inboundDeleteSuccess"), err)
+		return
+	}
+	_ = subscriptionService.RemoveInboundId(id)
+	needRestart, err := a.inboundService.DelInbound(id)
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	jsonMsgObj(c, I18nWeb(c, "pages.inbounds.toasts.inboundDeleteSuccess"), id, nil)
+	if needRestart {
+		a.xrayService.SetToNeedRestart()
+	}
+	user := session.GetLoginUser(c)
+	a.broadcastInboundsUpdate(user.Id)
+}
+
+func parseCsvInboundIds(s string) []int {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	ids := make([]int, 0, len(parts))
+	for _, p := range parts {
+		// Support both "inboundId" and "inboundId:clientId" formats
+		ref := strings.SplitN(strings.TrimSpace(p), ":", 2)
+		id, err := strconv.Atoi(ref[0])
+		if err == nil {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 // updateInbound updates an existing inbound configuration.
@@ -263,7 +411,18 @@ func (a *InboundController) setInboundEnable(c *gin.Context) {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
 	}
-	jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.inboundUpdateSuccess"), nil)
+	subs, _ := subscriptionService.GetByInboundId(id)
+	var subRefs []map[string]any
+	for _, sub := range subs {
+		subRefs = append(subRefs, map[string]any{
+			"id":     sub.Id,
+			"subId":  sub.SubId,
+			"remark": sub.Remark,
+		})
+	}
+	jsonMsgObj(c, I18nWeb(c, "pages.inbounds.toasts.inboundUpdateSuccess"), gin.H{
+		"subscriptions": subRefs,
+	}, nil)
 	if needRestart {
 		a.xrayService.SetToNeedRestart()
 	}
@@ -388,6 +547,30 @@ func (a *InboundController) delInboundClient(c *gin.Context) {
 		return
 	}
 	clientId := c.Param("clientId")
+
+	needRestart, err := a.inboundService.DelInboundClient(id, clientId)
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.inboundClientDeleteSuccess"), nil)
+	if needRestart {
+		a.xrayService.SetToNeedRestart()
+	}
+}
+
+// forceDelInboundClient removes a client and cleans up any subscription references.
+func (a *InboundController) forceDelInboundClient(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.inboundUpdateSuccess"), err)
+		return
+	}
+	clientId := c.Param("clientId")
+
+	if cid, convErr := strconv.Atoi(clientId); convErr == nil {
+		_, _, _ = subscriptionService.RemoveClientFromSubscriptions(id, cid)
+	}
 
 	needRestart, err := a.inboundService.DelInboundClient(id, clientId)
 	if err != nil {

@@ -37,6 +37,47 @@ import { useNodeList } from '@/composables/useNodeList.js';
 
 const { t } = useI18n();
 
+// ============ External address / port =================================
+const webDomain = ref('');
+const externalAddrType = ref('');        // '' = none, 'panel' = panel domain, 'custom' = custom
+const externalAddrCustomValue = ref('');
+
+const canProxy = computed(() => {
+  const p = inbound.value?.protocol;
+  return p === Protocols.VMESS || p === Protocols.VLESS || p === Protocols.TROJAN
+    || p === Protocols.SHADOWSOCKS || p === Protocols.HTTP || p === Protocols.MIXED;
+});
+const canToggleTls = computed(() => {
+  const p = inbound.value?.protocol;
+  return p === Protocols.VMESS || p === Protocols.VLESS || p === Protocols.HTTP || p === Protocols.MIXED;
+});
+const tlsForced = computed(() => {
+  const p = inbound.value?.protocol;
+  return p === Protocols.TROJAN || p === Protocols.HYSTERIA;
+});
+const tlsCapable = computed(() => canToggleTls.value || tlsForced.value);
+const showTlsSwitch = computed(() => {
+  if (!inbound.value || !tlsCapable.value) return false;
+  return externalAddrType.value === 'custom' || (webDomain.value === '' && externalAddrCustomValue.value);
+});
+
+watch(externalAddrType, (v) => {
+  if (v === 'panel') { dbForm.value.externalAddr = webDomain.value; }
+  else if (v === 'custom') { dbForm.value.externalAddr = externalAddrCustomValue.value || ''; }
+  else { dbForm.value.externalAddr = ''; externalAddrCustomValue.value = ''; }
+}, { flush: 'sync' });
+watch(externalAddrCustomValue, (v) => {
+  if (externalAddrType.value === 'custom') dbForm.value.externalAddr = v || '';
+}, { flush: 'sync' });
+
+async function fetchWebDomain() {
+  try {
+    const msg = await HttpUtil.post('/panel/setting/all');
+    if (msg?.success && msg.obj?.webDomain) webDomain.value = msg.obj.webDomain;
+  } catch (_e) { /* ignore */ }
+}
+// ======================================================================
+
 // Node selector — Phase 1 multi-node deployment. Shows all enabled
 // nodes regardless of online state so the form is usable while a node
 // is briefly offline; the backend's fail-fast path will surface the
@@ -195,14 +236,32 @@ const clientTotalGB = computed({
 });
 
 // === Open / state management =======================================
+function initExternalFields(dbIn) {
+  if (dbIn.externalAddr) {
+    if (webDomain.value && dbIn.externalAddr === webDomain.value) {
+      externalAddrType.value = 'panel';
+    } else {
+      externalAddrType.value = 'custom';
+      externalAddrCustomValue.value = dbIn.externalAddr;
+    }
+  } else {
+    externalAddrType.value = '';
+    externalAddrCustomValue.value = '';
+  }
+}
+
 function loadFromDbInbound(dbIn) {
   // Round-trip through Inbound.fromJson so subsequent edits get the
   // structured class hierarchy (StreamSettings, TLS, Reality, etc.).
   const parsed = Inbound.fromJson(dbIn.toInbound().toJson());
+  // Copy external fields from DBInbound to the parsed Inbound
+  parsed.externalAddr = dbIn.externalAddr || '';
+  parsed.externalPort = dbIn.externalPort || 0;
   inbound.value = parsed;
   // DBForm carries the persisted-fields the parsed Inbound doesn't:
   // remark, enable, total, expiryTime, trafficReset, etc.
   dbForm.value = new DBInbound(dbIn);
+  initExternalFields(dbIn);
   primeAdvancedJson();
 }
 
@@ -220,7 +279,7 @@ function freshDbForm() {
   next.remark = '';
   next.total = 0;
   next.expiryTime = 0;
-  next.trafficReset = 'never';
+  next.trafficReset = 'monthly';
   return next;
 }
 
@@ -231,9 +290,12 @@ function primeAdvancedJson() {
 
 watch(() => props.open, (next) => {
   if (!next) return;
+  fetchWebDomain();
   if (props.mode === 'edit' && props.dbInbound) {
     loadFromDbInbound(props.dbInbound);
   } else {
+    externalAddrType.value = '';
+    externalAddrCustomValue.value = '';
     inbound.value = makeFreshInbound(Protocols.VLESS);
     dbForm.value = freshDbForm();
     primeAdvancedJson();
@@ -282,10 +344,19 @@ watch(activeTabKey, (next, prev) => {
 });
 
 // In add mode, switching protocol restamps settings + re-syncs port.
+function resetExternalFieldsForProto(proto) {
+  const proxyable = [Protocols.VMESS, Protocols.VLESS, Protocols.TROJAN, Protocols.SHADOWSOCKS, Protocols.HTTP, Protocols.MIXED].includes(proto);
+  const tlsForcedProto = [Protocols.TROJAN, Protocols.HYSTERIA].includes(proto);
+  const tlsNoProto = [Protocols.SHADOWSOCKS, Protocols.TUNNEL, Protocols.WIREGUARD].includes(proto);
+  if (!proxyable) { dbForm.value.externalPort = null; }
+  if (tlsNoProto) { dbForm.value.externalAddrTls = true; }
+  else if (tlsForcedProto) { dbForm.value.externalAddrTls = true; }
+}
 function onProtocolChange(next) {
   if (props.mode === 'edit' || !inbound.value) return;
   inbound.value.protocol = next;
   inbound.value.settings = Inbound.Settings.getSettings(next);
+  resetExternalFieldsForProto(next);
   primeAdvancedJson();
 }
 
@@ -502,6 +573,13 @@ function randomAuth(target) {
 function randomSubId(target) {
   if (target) target.subId = RandomUtil.randomLowerAndNum(16);
 }
+
+const firstClientSubIdWeak = computed(() => {
+  const v = firstClient.value?.subId;
+  if (!v) return false;
+  return v.length < 8;
+});
+
 function regenWgKeypair(target) {
   const kp = Wireguard.generateKeypair();
   target.publicKey = kp.publicKey;
@@ -696,6 +774,9 @@ async function submit() {
       settings: settings,
       streamSettings: streamSettings,
       sniffing: sniffing,
+      externalAddr: dbForm.value.externalAddr || '',
+      externalAddrTls: tlsForced.value || dbForm.value.externalAddrTls,
+      externalPort: dbForm.value.externalPort == null ? 0 : dbForm.value.externalPort,
     };
     // Multi-node deployment: only include nodeId when the user picked a
     // remote node. Sending nodeId=null over qs.stringify becomes an
@@ -774,6 +855,32 @@ watch(() => inbound.value?.protocol, () => stampAdvancedTextFor('stream'));
           </a-form-item>
           <a-form-item :label="t('pages.inbounds.port')">
             <a-input-number v-model:value="inbound.port" :min="1" :max="65535" />
+          </a-form-item>
+          <!-- ============ External address / port ==================== -->
+          <a-form-item :label="t('pages.inbounds.externalAddr')">
+            <template v-if="webDomain">
+              <a-select v-model:value="externalAddrType" :style="{ width: '100%' }">
+                <a-select-option value="panel">{{ t('pages.inbounds.extAddrPanel') }} ({{ webDomain }})</a-select-option>
+                <a-select-option value="custom">{{ t('pages.inbounds.extAddrCustom') }}</a-select-option>
+                <a-select-option value="">{{ t('pages.inbounds.extAddrNone') }}</a-select-option>
+              </a-select>
+              <a-input v-if="externalAddrType === 'custom'" v-model:value="externalAddrCustomValue"
+                :placeholder="t('pages.inbounds.extAddrCustomPlaceholder')" class="mt-4" />
+            </template>
+            <template v-else>
+              <a-input v-model:value="dbForm.externalAddr" :placeholder="t('pages.inbounds.extAddrEmptyPlaceholder')" />
+            </template>
+            <a-form-item v-if="showTlsSwitch"
+              :style="{ marginBottom: 0, marginTop: '8px', paddingLeft: '0' }">
+              <template #label>
+                <span style="font-size:12px;color:#888">{{ t('pages.inbounds.extAddrTls') }}</span>
+              </template>
+              <a-switch v-model:checked="dbForm.externalAddrTls" :disabled="tlsForced" />
+            </a-form-item>
+          </a-form-item>
+          <a-form-item v-if="canProxy" :label="t('pages.inbounds.externalPort')">
+            <a-input-number v-model:value="dbForm.externalPort" :min="1" :max="65535"
+              allow-clear />
           </a-form-item>
           <a-form-item>
             <template #label>
@@ -868,11 +975,14 @@ watch(() => inbound.value?.protocol, () => stampAdvancedTextFor('stream'));
                 </a-form-item>
 
                 <a-form-item label="Subscription">
-                  <a-input v-model:value="firstClient.subId">
+                  <a-input v-model:value="firstClient.subId" :status="firstClientSubIdWeak ? 'warning' : undefined">
                     <template #addonAfter>
                       <SyncOutlined class="random-icon" @click="randomSubId(firstClient)" />
                     </template>
                   </a-input>
+                  <div v-if="firstClientSubIdWeak" style="color:#faad14;font-size:12px;margin-top:4px">
+                    {{ t('subIdTooShort', 'Subscription ID is too short and may be guessable') }}
+                  </div>
                 </a-form-item>
 
                 <a-form-item label="Comment">

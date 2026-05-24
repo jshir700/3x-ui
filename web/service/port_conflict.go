@@ -128,8 +128,13 @@ func isAnyListen(s string) bool {
 func (s *InboundService) checkPortConflict(inbound *model.Inbound, ignoreId int) (bool, error) {
 	db := database.GetDB()
 
+	// Disabled inbounds don't conflict with anyone
+	if !inbound.Enable {
+		return false, nil
+	}
+
 	var candidates []*model.Inbound
-	q := db.Model(model.Inbound{}).Where("port = ?", inbound.Port)
+	q := db.Model(model.Inbound{}).Where("port = ? AND enable = ?", inbound.Port, true)
 	if ignoreId > 0 {
 		q = q.Where("id != ?", ignoreId)
 	}
@@ -150,6 +155,21 @@ func (s *InboundService) checkPortConflict(inbound *model.Inbound, ignoreId int)
 		}
 	}
 	return false, nil
+}
+
+// portConflictErr returns an error with conflicting enabled inbound names
+func (s *InboundService) portConflictErr(port, ignoreId int) error {
+	db := database.GetDB()
+	var names []string
+	q := db.Model(&model.Inbound{}).Where("port = ? AND enable = ?", port, true)
+	if ignoreId > 0 {
+		q = q.Where("id != ?", ignoreId)
+	}
+	q.Pluck("remark", &names)
+	if len(names) == 0 {
+		return common.NewError(fmt.Sprintf("Port %d confict with enabled inbounds", port))
+	}
+	return common.NewError(fmt.Sprintf("Port %d confict with enabled inbounds: %s", port, strings.Join(names, ",")))
 }
 
 // sameNode reports whether two NodeID pointers refer to the same xray
@@ -241,17 +261,19 @@ func (s *InboundService) generateInboundTag(inbound *model.Inbound, ignoreId int
 
 // resolveInboundTag chooses a tag for an Add or Update. when the caller
 // supplied a non-empty Tag (e.g. the central panel pushed its picked
-// tag to a node during a multi-node sync) and that tag is free in the
-// local DB, it's used verbatim so the two panels stay in agreement —
-// otherwise the node would regenerate (often back to bare
-// "inbound-<port>") and the eventual traffic sync-back would try to
-// INSERT a row whose tag already exists, hitting the UNIQUE constraint
-// on inbounds.tag and rolling the node-side row right back out.
-// when Tag is empty (the common UI path) or collides, fall back to the
-// transport-aware generateInboundTag.
+// tag to a node during a multi-node sync) and that tag is free among
+// local inbounds in the DB, it's used verbatim so the two panels stay
+// in agreement — otherwise the node would regenerate (often back to
+// bare "inbound-<port>") and the eventual traffic sync-back would
+// create a duplicate. when Tag is empty (the common UI path) or
+// collides, fall back to the transport-aware generateInboundTag.
 //
 // ignoreId mirrors generateInboundTag: pass 0 on add, the inbound's
 // own id on update so a row doesn't see its own current tag as taken.
+//
+// With the (tag, node_id) composite unique index, local and remote
+// inbounds can share the same tag, so tagExists only checks local
+// inbounds (node_id IS NULL).
 func (s *InboundService) resolveInboundTag(inbound *model.Inbound, ignoreId int) (string, error) {
 	if inbound.Tag != "" {
 		taken, err := s.tagExists(inbound.Tag, ignoreId)
@@ -267,7 +289,7 @@ func (s *InboundService) resolveInboundTag(inbound *model.Inbound, ignoreId int)
 
 func (s *InboundService) tagExists(tag string, ignoreId int) (bool, error) {
 	db := database.GetDB()
-	q := db.Model(model.Inbound{}).Where("tag = ?", tag)
+	q := db.Model(model.Inbound{}).Where("tag = ? AND node_id IS NULL", tag)
 	if ignoreId > 0 {
 		q = q.Where("id != ?", ignoreId)
 	}

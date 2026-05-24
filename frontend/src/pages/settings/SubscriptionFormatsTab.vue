@@ -209,43 +209,7 @@ const directDomains = computed({
 </script>
 
 <template>
-  <a-collapse default-active-key="1">
-    <a-collapse-panel key="1" :header="t('pages.settings.panelSettings')">
-      <SettingListItem v-if="allSetting.subJsonEnable" paddings="small">
-        <template #title>JSON {{ t('pages.settings.subPath') }}</template>
-        <template #description>{{ t('pages.settings.subPathDesc') }}</template>
-        <template #control>
-          <a-input v-model:value="subJsonPath" type="text" placeholder="/json/" @blur="normalizePath('subJsonPath')" />
-        </template>
-      </SettingListItem>
-
-      <SettingListItem v-if="allSetting.subJsonEnable" paddings="small">
-        <template #title>JSON {{ t('pages.settings.subURI') }}</template>
-        <template #description>{{ t('pages.settings.subURIDesc') }}</template>
-        <template #control>
-          <a-input v-model:value="allSetting.subJsonURI" type="text" placeholder="(http|https)://domain[:port]/path/" />
-        </template>
-      </SettingListItem>
-
-      <SettingListItem v-if="allSetting.subClashEnable" paddings="small">
-        <template #title>Clash {{ t('pages.settings.subPath') }}</template>
-        <template #description>{{ t('pages.settings.subPathDesc') }}</template>
-        <template #control>
-          <a-input v-model:value="subClashPath" type="text" placeholder="/clash/"
-            @blur="normalizePath('subClashPath')" />
-        </template>
-      </SettingListItem>
-
-      <SettingListItem v-if="allSetting.subClashEnable" paddings="small">
-        <template #title>Clash {{ t('pages.settings.subURI') }}</template>
-        <template #description>{{ t('pages.settings.subURIDesc') }}</template>
-        <template #control>
-          <a-input v-model:value="allSetting.subClashURI" type="text"
-            placeholder="(http|https)://domain[:port]/path/" />
-        </template>
-      </SettingListItem>
-    </a-collapse-panel>
-
+  <a-collapse default-active-key="2">
     <a-collapse-panel key="2" :header="t('pages.settings.fragment')">
       <SettingListItem paddings="small">
         <template #title>{{ t('pages.settings.fragment') }}</template>

@@ -75,7 +75,7 @@ export function setupAxios() {
       }
       if (config.data instanceof FormData) {
         config.headers['Content-Type'] = 'multipart/form-data';
-      } else {
+      } else if (config.headers['Content-Type'] !== 'application/json') {
         config.data = qs.stringify(config.data, { arrayFormat: 'repeat' });
       }
       return config;

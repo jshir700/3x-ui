@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, defineAsyncComponent, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Modal, message } from 'ant-design-vue';
 import {
@@ -22,12 +22,19 @@ import InboundFormModal from './InboundFormModal.vue';
 import ClientFormModal from './ClientFormModal.vue';
 import ClientBulkModal from './ClientBulkModal.vue';
 import CopyClientsModal from './CopyClientsModal.vue';
+import BatchEditModal from './BatchEditModal.vue';
 import InboundInfoModal from './InboundInfoModal.vue';
 import QrCodeModal from './QrCodeModal.vue';
 import TextModal from '@/components/TextModal.vue';
 import PromptModal from '@/components/PromptModal.vue';
 import { useInbounds } from './useInbounds.js';
 import { useWebSocket } from '@/composables/useWebSocket.js';
+
+const SubscriptionFormModal = defineAsyncComponent(() =>
+  import('@/pages/subscription/SubscriptionFormModal.vue').catch((err) => {
+    console.error('[ASYNC] SubscriptionFormModal chunk load/eval failed:', err);
+    throw err;
+  }));
 
 const { t } = useI18n();
 
@@ -114,6 +121,70 @@ function hostOverrideFor(dbInbound) {
 const infoNodeAddress = computed(() => hostOverrideFor(infoDbInbound.value));
 const qrNodeAddress = computed(() => hostOverrideFor(qrDbInbound.value));
 
+// === Subscription form modal ============================================
+const subFormOpen = ref(false);
+const subFormMode = ref('add');
+const subFormData = ref(null);
+
+// === Row selection state ================================================
+const selectedIds = ref([]);
+const selectedClientIds = ref({});
+
+function getSelectedInbounds() {
+  if (selectedIds.value.length > 0) {
+    return selectedIds.value
+      .map(id => dbInbounds.value.find(ib => ib.id === id))
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function onClientSelectionChange({ inboundId, ids }) {
+  selectedClientIds.value = { ...selectedClientIds.value, [inboundId]: ids };
+  if (ids.length === 0) {
+    selectedIds.value = selectedIds.value.filter(id => id !== inboundId);
+  } else if (!selectedIds.value.includes(inboundId)) {
+    selectedIds.value = [...selectedIds.value, inboundId];
+  }
+}
+
+// Trigger a shallowRef re-render after an enable-switch optimistic update,
+// so the switch :checked binding updates immediately without waiting for
+// the next WebSocket broadcast.
+function onToggleEnable() {
+  dbInbounds.value = [...dbInbounds.value];
+}
+
+async function onSubSave(payload) {
+  const { useSubscription } = await import('@/pages/subscription/useSubscription.js');
+  const { create: createSub, update: updateSub } = useSubscription();
+  let msg;
+  if (subFormMode.value === 'edit' && subFormData.value?.id) {
+    msg = await updateSub(subFormData.value.id, payload);
+  } else {
+    msg = await createSub(payload);
+  }
+  if (msg?.success) {
+    message.success('订阅已创建');
+  }
+  return msg;
+}
+
+// === Enable-switch race guard =========================================
+// When the enable-switch calls setEnable, the backend sends an invalidate
+// WebSocket event that triggers refresh(). But the refresh() may fetch
+// stale data (before the DB commit is visible). Prevent this race by
+// suppressing the next invalidate within a short window.
+let skipNextInvalidate = false;
+window.__setSkipInvalidate = (dur) => {
+  skipNextInvalidate = true;
+  setTimeout(() => { skipNextInvalidate = false; }, dur || 500);
+};
+window.__skipNextInvalidate = () => {
+  if (skipNextInvalidate) { skipNextInvalidate = false; return true; }
+  return false;
+};
+
 // === Shared text + prompt modal state =================================
 const textOpen = ref(false);
 const textTitle = ref('');
@@ -159,7 +230,7 @@ async function onPromptConfirm(value) {
 function exportInboundLinks(dbInbound) {
   const projected = checkFallback(dbInbound);
   openText({
-    title: 'Export inbound links',
+    title: t('pages.inbounds.exportInbound'),
     content: projected.genInboundLinks(remarkModel.value, hostOverrideFor(dbInbound)),
     fileName: projected.remark || 'inbound',
   });
@@ -191,37 +262,59 @@ function exportInboundSubs(dbInbound) {
 function exportAllLinks() {
   const out = [];
   for (const ib of dbInbounds.value) {
-    out.push(ib.genInboundLinks(remarkModel.value, hostOverrideFor(ib)));
+    if (!selectedIds.value.includes(ib.id)) continue;
+    const clientKeys = selectedClientIds.value[ib.id];
+    const hasSelectedClients = clientKeys && clientKeys.length > 0;
+    const links = ib.genInboundLinks(remarkModel.value, hostOverrideFor(ib), hasSelectedClients ? clientKeys : null);
+    if (links) out.push(links);
   }
   openText({
-    title: 'Export all inbound links',
+    title: t('pages.inbounds.exportAllLinks'),
     content: out.join('\r\n'),
-    fileName: 'All-Inbounds',
+    fileName: t('subAllInbounds'),
   });
 }
 
 function exportAllSubs() {
-  const out = [];
-  for (const ib of dbInbounds.value) {
-    const inbound = ib.toInbound();
-    const clients = inbound?.clients || [];
-    for (const c of clients) {
-      if (c.subId && subSettings.value.subURI) {
-        out.push(subSettings.value.subURI + c.subId);
+  // Use the current row selection to pre-populate the subscription form:
+  // - checked inbound row → whole inbound (id as number)
+  // - checked client box → that specific client ("inboundId:clientId")
+  //
+  // selectedClientIds stores rowKey strings (email). The subscription form
+  // expects numeric clientId — build a lookup map from settings JSON.
+  const emailToClientId = {};
+  for (const dbIb of dbInbounds.value) {
+    try {
+      const raw = typeof dbIb.settings === 'string' ? JSON.parse(dbIb.settings) : (dbIb.settings || {});
+      for (const c of (raw.clients || [])) {
+        if (c.email && c.clientId) emailToClientId[`${dbIb.id}:${c.email}`] = c.clientId;
       }
+    } catch (_e) { /* skip corrupt settings */ }
+  }
+  const preselect = [];
+  const ids = selectedIds.value;
+  const sc = selectedClientIds.value;
+  for (const id of ids) {
+    const clientEmails = sc[id];
+    if (clientEmails && clientEmails.length > 0) {
+      for (const email of clientEmails) {
+        const cid = emailToClientId[`${id}:${email}`];
+        if (cid) preselect.push(`${id}:${cid}`);
+      }
+    } else {
+      preselect.push(id);
     }
   }
-  openText({
-    title: 'Export all subscription links',
-    content: [...new Set(out)].join('\r\n'),
-    fileName: 'All-Inbounds-Subs',
-  });
+  subFormMode.value = 'add';
+  subFormData.value = null;
+  window.__subPreselectIds = preselect;
+  subFormOpen.value = true;
 }
 
 function importInbound() {
   openPrompt({
-    title: 'Import inbound',
-    okText: 'Import',
+    title: t('pages.inbounds.importInbound'),
+    okText: t('pages.inbounds.import'),
     type: 'textarea',
     value: '',
     confirm: async (value) => {
@@ -320,9 +413,12 @@ async function onResetTrafficClient({ dbInbound, client }) {
   if (msg?.success) await refresh();
 }
 
-async function onDeleteClient({ dbInbound, client }) {
+async function onDeleteClient({ dbInbound, client, force }) {
   const clientId = getClientId(dbInbound.protocol, client);
-  const msg = await HttpUtil.post(`/panel/api/inbounds/${dbInbound.id}/delClient/${clientId}`);
+  const endpoint = force
+    ? `/panel/api/inbounds/${dbInbound.id}/forceDelClient/${clientId}`
+    : `/panel/api/inbounds/${dbInbound.id}/delClient/${clientId}`;
+  const msg = await HttpUtil.post(endpoint);
   if (msg?.success) await refresh();
 }
 
@@ -376,15 +472,42 @@ function openAddBulkClient(dbInbound) {
 }
 
 // Per-row destructive actions go through Modal.confirm (matches legacy).
-function confirmDelete(dbInbound) {
+async function confirmDelete(dbInbound) {
+  let subRows = '';
+
+  try {
+    const resp = await HttpUtil.get(`/panel/api/inbounds/checkSubscriptions/${dbInbound.id}`);
+    if (resp?.success && resp.obj?.subscriptions?.length > 0) {
+      const subs = resp.obj.subscriptions;
+      const fmtSub = (s) => `${s.remark || s.subId} (${s.subId})`;
+      const willUpdate = subs.filter(s => !s.onlyOne);
+      const willDelete = subs.filter(s => s.onlyOne);
+      const isMulti = dbInbound.isMultiUser();
+      const clientWord = isMulti ? t('pages.inbounds.batch.subWillRemoveInboundClientsSuffix') : '';
+
+      if (willUpdate.length > 0) {
+        subRows += `${isMulti ? t('pages.inbounds.batch.subWillRemoveInboundClients') : t('pages.inbounds.batch.subWillRemoveInbound')}:\n${willUpdate.map(fmtSub).join(', ')}`;
+      }
+      if (willDelete.length > 0) {
+        if (subRows) subRows += '\n\n';
+        subRows += `${isMulti ? t('pages.inbounds.batch.subWillDeleteInboundClients') : t('pages.inbounds.batch.subWillDeleteInbound')}:\n${willDelete.map(fmtSub).join(', ')}`;
+      }
+    }
+  } catch (_e) { /* proceed without subscription info */ }
+
+  const hasSubs = subRows !== '';
+
   Modal.confirm({
     title: `Delete inbound "${dbInbound.remark}"?`,
-    content: 'This removes the inbound and all its clients. This cannot be undone.',
+    content: subRows || 'This removes the inbound and all its clients. This cannot be undone.',
     okText: 'Delete',
     okType: 'danger',
     cancelText: 'Cancel',
     onOk: async () => {
-      const msg = await HttpUtil.post(`/panel/api/inbounds/del/${dbInbound.id}`);
+      const endpoint = hasSubs
+        ? `/panel/api/inbounds/forceDel/${dbInbound.id}`
+        : `/panel/api/inbounds/del/${dbInbound.id}`;
+      const msg = await HttpUtil.post(endpoint);
       if (msg?.success) await refresh();
     },
   });
@@ -447,8 +570,198 @@ function confirmClone(dbInbound) {
   });
 }
 
+// === Batch operations =================================================
+function getIntClientIdFromSettings(settingsStr, client) {
+  try {
+    const raw = typeof settingsStr === 'string' ? JSON.parse(settingsStr) : (settingsStr || {});
+    const clients = raw.clients || [];
+    const email = client.email;
+    if (email) {
+      const found = clients.find(c => c.email === email);
+      if (found?.clientId) return found.clientId;
+    }
+    const clientKey = client.id || client.password || client.auth;
+    if (clientKey) {
+      for (const c of clients) {
+        if (c.id === clientKey || c.password === clientKey || c.auth === clientKey) {
+          if (c.clientId) return c.clientId;
+        }
+      }
+    }
+  } catch (_e) { /* ignore */ }
+  return 0;
+}
+
+async function onBatchDeleteInbounds() {
+  const ids = selectedIds.value;
+  if (ids.length < 2) return;
+  const fmtSub = (s) => `${s.remark || s.subId} (${s.subId})`;
+  const subInfoByInbound = {}; // inboundId -> { willUpdate: [], willDelete: [] }
+
+  for (const id of ids) {
+    try {
+      const resp = await HttpUtil.get(`/panel/api/inbounds/checkSubscriptions/${id}`);
+      if (resp?.success && resp.obj?.subscriptions?.length > 0) {
+        const subs = resp.obj.subscriptions;
+        const willUpdate = subs.filter(s => !s.onlyOne);
+        const willDelete = subs.filter(s => s.onlyOne);
+        if (willUpdate.length > 0 || willDelete.length > 0) {
+          subInfoByInbound[id] = { willUpdate, willDelete };
+        }
+      }
+    } catch (_e) { /* skip */ }
+  }
+
+  let content = t('pages.inbounds.batch.deleteInboundsMsg', { count: ids.length });
+
+  const hasAnySubs = Object.keys(subInfoByInbound).length > 0;
+  if (hasAnySubs) {
+    content += '\n';
+    for (const id of ids) {
+      const info = subInfoByInbound[id];
+      if (!info) continue;
+      const dbInbound = dbInbounds.value.find(ib => ib.id === id);
+      if (!dbInbound) continue;
+      const isMulti = dbInbound.isMultiUser();
+      content += `\n· ${t('pages.inbounds.inbound')} "${dbInbound.remark}" (${dbInbound.protocol}):`;
+      if (info.willUpdate.length > 0) {
+        content += `\n${isMulti ? t('pages.inbounds.batch.subWillRemoveInboundClients') : t('pages.inbounds.batch.subWillRemoveInbound')}:\n${info.willUpdate.map(fmtSub).join(', ')}`;
+      }
+      if (info.willDelete.length > 0) {
+        content += `\n${isMulti ? t('pages.inbounds.batch.subWillDeleteInboundClients') : t('pages.inbounds.batch.subWillDeleteInbound')}:\n${info.willDelete.map(fmtSub).join(', ')}`;
+      }
+    }
+  }
+
+  Modal.confirm({
+    title: t('pages.inbounds.batch.deleteInboundsConfirm', { count: ids.length }),
+    content,
+    okText: t('pages.inbounds.batch.deleteInboundsOk', { count: ids.length }),
+    okType: 'danger',
+    cancelText: t('cancel'),
+    onOk: async () => {
+      for (const id of ids) {
+        const hasSubs = !!subInfoByInbound[id];
+        const endpoint = hasSubs
+          ? `/panel/api/inbounds/forceDel/${id}`
+          : `/panel/api/inbounds/del/${id}`;
+        await HttpUtil.post(endpoint);
+      }
+      await refresh();
+    },
+  });
+}
+
+async function onBatchDeleteClients() {
+  const sc = selectedClientIds.value;
+  // Flatten: [{ inboundId, client, dbInbound, intClientId }]
+  const entries = [];
+  for (const [inboundIdStr, rowKeys] of Object.entries(sc)) {
+    if (!rowKeys || rowKeys.length === 0) continue;
+    const inboundId = Number(inboundIdStr);
+    const dbInbound = dbInbounds.value.find(ib => ib.id === inboundId);
+    if (!dbInbound) continue;
+    if (!dbInbound.isMultiUser()) continue;
+    const inbound = dbInbound.toInbound();
+    const clients = inbound?.clients || [];
+    // Exclude single-client inbounds where the only client is selected
+    if (clients.length <= 1) continue;
+    for (const client of clients) {
+      const key = client.email || client.id || client.password || JSON.stringify(client);
+      if (rowKeys.includes(key)) {
+        const intId = getIntClientIdFromSettings(dbInbound.settings, client);
+        entries.push({ inboundId, client, dbInbound, intClientId: intId });
+      }
+    }
+  }
+
+  const totalClients = entries.length;
+  if (totalClients < 2) return;
+  const totalInbounds = new Set(entries.map(e => e.inboundId)).size;
+  const fmtSub = (s) => `${s.remark || s.subId} (${s.subId})`;
+
+  // Check subscriptions for each client
+  const subInfoByEntry = {}; // entry index -> { affected: [], toBeDeleted: [] }
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    if (!e.intClientId) continue;
+    try {
+      const resp = await HttpUtil.get(
+        `/panel/api/inbounds/checkClientSubscriptions/${e.inboundId}/${e.intClientId}`,
+      );
+      if (resp?.success) {
+        const affected = resp.obj?.affected || [];
+        const toBeDeleted = resp.obj?.toBeDeleted || [];
+        if (affected.length > 0 || toBeDeleted.length > 0) {
+          subInfoByEntry[i] = { affected, toBeDeleted };
+        }
+      }
+    } catch (_ex) { /* skip */ }
+  }
+
+  let content = t('pages.inbounds.batch.deleteClientsMsg', { count: totalClients, inboundCount: totalInbounds });
+
+  const hasAnySubs = Object.keys(subInfoByEntry).length > 0;
+  if (hasAnySubs) {
+    content += '\n';
+    for (let i = 0; i < entries.length; i++) {
+      const info = subInfoByEntry[i];
+      if (!info) continue;
+      const e = entries[i];
+      content += `\n· ${t('pages.inbounds.inbound')} "${e.dbInbound.remark}" / ${e.client.email}:`;
+      if (info.affected.length > 0) {
+        content += `\n${t('pages.inbounds.batch.subWillRemoveClient')}:\n${info.affected.map(fmtSub).join(', ')}`;
+      }
+      if (info.toBeDeleted.length > 0) {
+        content += `\n${t('pages.inbounds.batch.subWillDeleteClient')}:\n${info.toBeDeleted.map(fmtSub).join(', ')}`;
+      }
+    }
+  }
+
+  Modal.confirm({
+    title: t('pages.inbounds.batch.deleteClientsConfirm', { count: totalClients }),
+    content,
+    okText: t('pages.inbounds.batch.deleteClientsOk', { count: totalClients }),
+    okType: 'danger',
+    cancelText: t('cancel'),
+    onOk: async () => {
+      for (let i = 0; i < entries.length; i++) {
+        const e = entries[i];
+        const clientId = getClientId(e.dbInbound.protocol, e.client);
+        const hasSubs = !!subInfoByEntry[i];
+        const endpoint = hasSubs
+          ? `/panel/api/inbounds/${e.inboundId}/forceDelClient/${clientId}`
+          : `/panel/api/inbounds/${e.inboundId}/delClient/${clientId}`;
+        await HttpUtil.post(endpoint);
+      }
+      await refresh();
+    },
+  });
+}
+
+const batchEditOpen = ref(false);
+const batchEditInbounds = ref([]);
+
+function onBatchEditInbounds() {
+  const ids = selectedIds.value;
+  if (ids.length < 2) return;
+  batchEditInbounds.value = ids
+    .map(id => dbInbounds.value.find(ib => ib.id === id))
+    .filter(Boolean);
+  batchEditOpen.value = true;
+}
+
 function onGeneralAction(key) {
   switch (key) {
+    case 'batchEdit':
+      onBatchEditInbounds();
+      break;
+    case 'batchDelClients':
+      onBatchDeleteClients();
+      break;
+    case 'batchDelInbounds':
+      onBatchDeleteInbounds();
+      break;
     case 'import':
       importInbound();
       break;
@@ -513,7 +826,26 @@ function onRowAction({ key, dbInbound }) {
       exportInboundLinks(dbInbound);
       break;
     case 'subs':
-      exportInboundSubs(dbInbound);
+      // Single-client inbound → auto-select that client.
+      // Multi-client inbound → pre-select nothing, let the user pick.
+      let preselect = [];
+      try {
+        const parsed = dbInbound.toInbound();
+        const clients = parsed?.clients || [];
+        if (clients.length === 1) {
+          const raw = typeof dbInbound.settings === 'string'
+            ? JSON.parse(dbInbound.settings)
+            : (dbInbound.settings || {});
+          const clientId = raw?.clients?.[0]?.clientId || 0;
+          if (clientId > 0) {
+            preselect = [`${dbInbound.id}:${clientId}`];
+          }
+        }
+      } catch (_e) { /* fall through — empty preselect */ }
+      window.__subPreselectIds = preselect;
+      subFormMode.value = 'add';
+      subFormData.value = null;
+      subFormOpen.value = true;
       break;
     case 'clipboard':
       exportInboundClipboard(dbInbound);
@@ -650,11 +982,16 @@ function onRowAction({ key, dbInbound }) {
                   :traffic-diff="trafficDiff" :page-size="pageSize" :is-mobile="isMobile"
                   :sub-enable="subSettings.enable" :nodes-by-id="nodesById" :has-active-node="hasActiveNode"
                   :stats-version="statsVersion"
+                  :selected-ids="selectedIds"
+                  :selected-client-ids="selectedClientIds"
+                  @update:selected-ids="selectedIds = $event"
+                  @update:selected-client-ids="onClientSelectionChange"
                   @refresh="refresh"
                   @add-inbound="onAddInbound" @general-action="onGeneralAction" @row-action="onRowAction"
                   @edit-client="onEditClient" @qrcode-client="onQrcodeClient" @info-client="onInfoClient"
                   @reset-traffic-client="onResetTrafficClient" @delete-client="onDeleteClient"
-                  @delete-clients="onDeleteClients" @toggle-enable-client="onToggleEnableClient" />
+                  @delete-clients="onDeleteClients" @toggle-enable-client="onToggleEnableClient"
+                  @toggle-enable="onToggleEnable" />
               </a-col>
             </a-row>
           </a-spin>
@@ -679,6 +1016,9 @@ function onRowAction({ key, dbInbound }) {
       <TextModal v-model:open="textOpen" :title="textTitle" :content="textContent" :file-name="textFileName" />
       <PromptModal v-model:open="promptOpen" :title="promptTitle" :ok-text="promptOkText" :type="promptType"
         :initial-value="promptInitial" :loading="promptLoading" @confirm="onPromptConfirm" />
+      <SubscriptionFormModal v-model:open="subFormOpen" :mode="subFormMode" :subscription="subFormData"
+        :save="onSubSave" />
+      <BatchEditModal v-model:open="batchEditOpen" :inbounds="batchEditInbounds" @done="refresh" />
     </a-layout>
   </a-config-provider>
 </template>

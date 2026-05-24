@@ -1,11 +1,12 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { ExclamationCircleFilled, CloudOutlined, ApiOutlined } from '@ant-design/icons-vue';
 import { Modal } from 'ant-design-vue';
 
 import { OutboundDomainStrategies } from '@/models/outbound.js';
 import SettingListItem from '@/components/SettingListItem.vue';
+import { cronToDescription } from '@/utils/cron-parser.js';
 
 const { t } = useI18n();
 
@@ -24,6 +25,28 @@ const props = defineProps({
   outboundTestUrl: { type: String, default: '' },
   warpExist: { type: Boolean, default: false },
   nordExist: { type: Boolean, default: false },
+  allSetting: { type: Object, default: null },
+});
+
+function formatTzOffset(minutes) {
+  const sign = minutes >= 0 ? '+' : '-';
+  const abs = Math.abs(minutes);
+  const h = Math.floor(abs / 60);
+  const m = abs % 60;
+  return `${sign}${h}${m ? ':' + String(m).padStart(2, '0') : ''}`;
+}
+function tzLabel(tz) {
+  if (!tz || tz === 'Local') tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  try {
+    const offsetMin = new Date().toLocaleString('en-US', { timeZone: tz, timeZoneName: 'shortOffset' }).match(/([+-]\d+)/)?.[1];
+    if (offsetMin) return `${tz.replace(/_/g, ' ')} (UTC${offsetMin})`;
+    return tz.replace(/_/g, ' ');
+  } catch { return tz.replace(/_/g, ' '); }
+}
+
+const cronDescription = computed(() => {
+  const expr = props.allSetting?.xrayUpdateCron || '';
+  return cronToDescription(expr, t('subUpdateXray'), t);
 });
 
 const emit = defineEmits(['update:outbound-test-url', 'show-warp', 'show-nord', 'reset-default']);
@@ -299,6 +322,29 @@ const localOutboundTestUrl = computed({
       </SettingListItem>
     </a-collapse-panel>
 
+    <a-collapse-panel key="update" :header="t('subUpdates')">
+      <SettingListItem paddings="small">
+        <template #title>{{ t('subKeepUpdated') }}</template>
+        <template #description>{{ t('subAutoUpdateDesc') }}</template>
+        <template #control>
+          <a-switch v-model:checked="allSetting.xrayAutoUpdate" />
+        </template>
+      </SettingListItem>
+
+      <SettingListItem paddings="small">
+        <template #title>{{ t('subScheduledUpdate') }}</template>
+        <template #description>{{ t('subCronExpr') }}: {{ tzLabel(allSetting?.timeLocation) }}</template>
+        <template #control>
+          <a-input v-model:value="allSetting.xrayUpdateCron"
+            :disabled="!allSetting?.xrayAutoUpdate"
+            placeholder="0 30 2 * * *" />
+          <div v-if="allSetting?.xrayAutoUpdate && cronDescription" class="cron-hint">
+            {{ cronDescription }}
+          </div>
+        </template>
+      </SettingListItem>
+    </a-collapse-panel>
+
     <a-collapse-panel key="2" :header="t('pages.xray.statistics')">
       <SettingListItem paddings="small">
         <template #title>{{ t('pages.xray.statsInboundUplink') }}</template>
@@ -496,5 +542,11 @@ const localOutboundTestUrl = computed({
 
 .hint-alert {
   text-align: center;
+}
+
+.cron-hint {
+  font-size: 12px;
+  color: #888;
+  margin-top: 8px;
 }
 </style>

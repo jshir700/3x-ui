@@ -118,6 +118,12 @@ func (s *SubClashService) GetClash(subId string, host string) (string, string, e
 	return string(finalYAML), header, nil
 }
 
+// GetClashForClient generates Clash proxy entries for a single inbound+client.
+func (s *SubClashService) GetClashForClient(inbound *model.Inbound, client model.Client, host string) []map[string]any {
+	s.SubService.PrepareForRequest(host)
+	return s.getProxies(inbound, client, host)
+}
+
 func (s *SubClashService) getProxies(inbound *model.Inbound, client model.Client, host string) []map[string]any {
 	stream := s.streamData(inbound.StreamSettings)
 	// For node-managed inbounds the Clash proxy "server" must be the

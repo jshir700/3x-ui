@@ -77,6 +77,10 @@ type AllSetting struct {
 	SubShowInfo                 bool   `json:"subShowInfo" form:"subShowInfo"`                                 // Show client information in subscriptions
 	SubEmailInRemark            bool   `json:"subEmailInRemark" form:"subEmailInRemark"`                       // Include email in subscription remark/name
 	SubURI                      string `json:"subURI" form:"subURI"`                                           // Subscription server URI
+	SubUriScheme                string `json:"subUriScheme" form:"subUriScheme"`                               // Subscription custom URI scheme
+	SubUriAddress               string `json:"subUriAddress" form:"subUriAddress"`                             // Subscription custom URI address
+	SubUriPort                  int    `json:"subUriPort" form:"subUriPort"`                                   // Subscription custom URI port
+	SubUriPath                  string `json:"subUriPath" form:"subUriPath"`                                   // Subscription custom URI path
 	SubJsonPath                 string `json:"subJsonPath" form:"subJsonPath"`                                 // Path for JSON subscription endpoint
 	SubJsonURI                  string `json:"subJsonURI" form:"subJsonURI"`                                   // JSON subscription server URI
 	SubClashEnable              bool   `json:"subClashEnable" form:"subClashEnable"`                           // Enable Clash/Mihomo subscription endpoint
@@ -86,6 +90,10 @@ type AllSetting struct {
 	SubJsonNoises               string `json:"subJsonNoises" form:"subJsonNoises"`                             // JSON subscription noise configuration
 	SubJsonMux                  string `json:"subJsonMux" form:"subJsonMux"`                                   // JSON subscription mux configuration
 	SubJsonRules                string `json:"subJsonRules" form:"subJsonRules"`
+
+	// Xray auto update settings
+	XrayAutoUpdate bool   `json:"xrayAutoUpdate" form:"xrayAutoUpdate"` // Enable automatic Xray updates
+	XrayUpdateCron string `json:"xrayUpdateCron" form:"xrayUpdateCron"` // Cron schedule for Xray updates
 
 	// LDAP settings
 	LdapEnable     bool   `json:"ldapEnable" form:"ldapEnable"`

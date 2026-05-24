@@ -42,6 +42,7 @@ func initModels() error {
 		&model.CustomGeoResource{},
 		&model.Node{},
 		&model.ApiToken{},
+		&model.Subscription{},
 	}
 	for _, mdl := range models {
 		if err := db.AutoMigrate(mdl); err != nil {
@@ -187,6 +188,16 @@ func seedApiTokens() error {
 	return db.Create(&model.HistoryOfSeeders{SeederName: "ApiTokensTable"}).Error
 }
 
+// migrateInboundIndexes drops the old single-column unique index on
+// inbounds.tag (used before (tag, node_id) became the unique constraint)
+// so that AutoMigrate can create the new composite index idx_tag_node.
+func migrateInboundIndexes() error {
+	if db.Migrator().HasIndex(&model.Inbound{}, "idx_inbounds_tag") {
+		return db.Migrator().DropIndex(&model.Inbound{}, "idx_inbounds_tag")
+	}
+	return nil
+}
+
 // isTableEmpty returns true if the named table contains zero rows.
 func isTableEmpty(tableName string) (bool, error) {
 	var count int64
@@ -237,6 +248,10 @@ func InitDB(dbPath string) error {
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
 	if err := initModels(); err != nil {
+		return err
+	}
+
+	if err := migrateInboundIndexes(); err != nil {
 		return err
 	}
 

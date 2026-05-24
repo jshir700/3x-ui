@@ -13,5 +13,6 @@ services:
       XUI_ENABLE_FAIL2BAN: "true"
     tty: true
     ports:
-      - "2053:2053"
+      - "3443:2053"
+      - "8443:8443"
     restart: unless-stopped

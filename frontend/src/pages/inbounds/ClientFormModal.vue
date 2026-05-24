@@ -172,6 +172,12 @@ function randomSubId() {
   if (client.value) client.value.subId = RandomUtil.randomLowerAndNum(16);
 }
 
+const subIdWeak = computed(() => {
+  const v = client.value?.subId;
+  if (!v) return false;
+  return v.length < 8;
+});
+
 const clientIpsText = ref('');
 async function loadClientIps() {
   if (!client.value?.email) return;
@@ -214,7 +220,7 @@ async function submit() {
   try {
     const payload = {
       id: props.dbInbound.id,
-      settings: `{"clients": [${client.value.toString()}]}`,
+      settings: `{"clients": [${client.value.toString(false)}]}`,
     };
     const url = props.mode === 'edit'
       ? `/panel/api/inbounds/updateClient/${oldClientId.value}`
@@ -293,7 +299,10 @@ const title = computed(() =>
           {{ t('subscription.title') }}
           <SyncOutlined class="random-icon" @click="randomSubId" />
         </template>
-        <a-input v-model:value="client.subId" />
+        <a-input v-model:value="client.subId" :status="subIdWeak ? 'warning' : undefined" />
+        <div v-if="subIdWeak" style="color:#faad14;font-size:12px;margin-top:4px">
+          {{ t('subIdTooShort', 'Subscription ID is too short and may be guessable') }}
+        </div>
       </a-form-item>
 
       <a-form-item v-if="client.email && tgBotEnable" label="Telegram ID">

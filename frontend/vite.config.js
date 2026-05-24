@@ -28,6 +28,8 @@ const BASE_MIGRATED_ROUTES = {
   'panel/nodes/': '/nodes.html',
   'panel/api-docs': '/api-docs.html',
   'panel/api-docs/': '/api-docs.html',
+  'panel/subscription': '/subscription.html',
+  'panel/subscription/': '/subscription.html',
 };
 
 let cachedBasePath = '/';
@@ -154,6 +156,7 @@ export default defineConfig({
         nodes: path.resolve(__dirname, 'nodes.html'),
         apiDocs: path.resolve(__dirname, 'api-docs.html'),
         subpage: path.resolve(__dirname, 'subpage.html'),
+        subscription: path.resolve(__dirname, 'subscription.html'),
       },
       output: {
         manualChunks(id) {

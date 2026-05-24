@@ -1,6 +1,8 @@
 <script setup>
 import { CopyOutlined, DownloadOutlined } from '@ant-design/icons-vue';
 import { message } from 'ant-design-vue';
+import { useI18n } from 'vue-i18n';
+const { t } = useI18n();
 
 import { ClipboardManager, FileManager } from '@/utils';
 
@@ -15,6 +17,7 @@ defineProps({
   // When set, surfaces a download button that writes `content` to a
   // text file with this name.
   fileName: { type: String, default: '' },
+  downloadText: { type: String, default: '' },
 });
 
 const emit = defineEmits(['update:open']);
@@ -45,13 +48,13 @@ function download(content, name) {
         <template #icon>
           <DownloadOutlined />
         </template>
-        {{ fileName }}
+        {{ downloadText || fileName }}
       </a-button>
       <a-button type="primary" @click="copy(content)">
         <template #icon>
           <CopyOutlined />
         </template>
-        Copy
+        {{ t('subCopy') }}
       </a-button>
     </template>
   </a-modal>

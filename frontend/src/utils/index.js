@@ -1,5 +1,7 @@
 import axios from 'axios';
 import { message as antMessage } from 'ant-design-vue';
+// NOTE: do NOT statically import from @/i18n here — it creates a circular
+// dependency with @/i18n → @/utils.  Use dynamic import inside _handleMsg().
 
 export class Msg {
     constructor(success = false, msg = "", obj = null) {
@@ -10,9 +12,24 @@ export class Msg {
 }
 
 export class HttpUtil {
-    static _handleMsg(msg) {
+    static tCache = null;
+    static async _ensureT() {
+        if (!HttpUtil.tCache) {
+            try { const { t } = await import('@/i18n'); HttpUtil.tCache = t; } catch { HttpUtil.tCache = (k) => k; }
+        }
+    }
+    static async _handleMsg(msg) {
         if (!(msg instanceof Msg) || msg.msg === "") {
             return;
+        }
+        await HttpUtil._ensureT();
+        // Translate port conflict messages
+        if (msg.msg.includes('confict with enabled inbounds:')) {
+            const m = msg.msg.match(/Port (\d+) confict with enabled inbounds:\s*(.+)/);
+            if (m) {
+                antMessage.error(HttpUtil.tCache('subPortConflict', { port: m[1], names: m[2] }));
+                return;
+            }
         }
         const messageType = msg.success ? 'success' : 'error';
         antMessage[messageType](msg.msg);
@@ -36,12 +53,12 @@ export class HttpUtil {
         try {
             const resp = await axios.get(url, { params, ...options });
             const msg = this._respToMsg(resp);
-            this._handleMsg(msg);
+            await this._handleMsg(msg);
             return msg;
         } catch (error) {
             console.error('GET request failed:', error);
             const errorMsg = new Msg(false, error.response?.data?.message || error.message || 'Request failed');
-            this._handleMsg(errorMsg);
+            await this._handleMsg(errorMsg);
             return errorMsg;
         }
     }
@@ -50,12 +67,12 @@ export class HttpUtil {
         try {
             const resp = await axios.post(url, data, options);
             const msg = this._respToMsg(resp);
-            this._handleMsg(msg);
+            await this._handleMsg(msg);
             return msg;
         } catch (error) {
             console.error('POST request failed:', error);
             const errorMsg = new Msg(false, error.response?.data?.message || error.message || 'Request failed');
-            this._handleMsg(errorMsg);
+            await this._handleMsg(errorMsg);
             return errorMsg;
         }
     }

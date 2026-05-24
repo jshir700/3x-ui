@@ -1,0 +1,9 @@
+frontend/node_modules/
+db/
+cert/
+.git/
+.kilo/
+.claude/
+*.db
+*.db-journal
+*.db-wal

@@ -166,6 +166,23 @@ func (s *SubJsonService) GetJson(subId string, host string) (string, string, err
 	return string(finalJson), header, nil
 }
 
+// GetJsonForClient generates a JSON subscription config for a single inbound+client.
+func (s *SubJsonService) GetJsonForClient(inbound *model.Inbound, client model.Client, host string) string {
+	s.SubService.PrepareForRequest(host)
+	configs := s.getConfig(inbound, client, host)
+	if len(configs) == 0 {
+		return ""
+	}
+	if len(configs) == 1 {
+		return string(configs[0])
+	}
+	parts := make([]string, len(configs))
+	for i, c := range configs {
+		parts[i] = string(c)
+	}
+	return "[" + strings.Join(parts, ",") + "]"
+}
+
 func (s *SubJsonService) getConfig(inbound *model.Inbound, client model.Client, host string) []json_util.RawMessage {
 	var newJsonArray []json_util.RawMessage
 	stream := s.streamData(inbound.StreamSettings)

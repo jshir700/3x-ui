@@ -1,10 +1,11 @@
 <script setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { CopyOutlined, DownloadOutlined, PictureOutlined } from '@ant-design/icons-vue';
 import { message } from 'ant-design-vue';
 
 import { ClipboardManager, FileManager } from '@/utils';
+import { theme as themeState } from '@/composables/useTheme.js';
 
 const { t } = useI18n();
 
@@ -17,6 +18,14 @@ const props = defineProps({
 });
 
 const qrRef = ref(null);
+
+// QR colours adapt to theme
+const qrColor = computed(() => (themeState.isDark || themeState.isUltra) ? '#fff' : '#000');
+const qrBg = computed(() => {
+  if (themeState.isUltra) return '#0c0e12';
+  if (themeState.isDark) return '#252526';
+  return '#ffffff';
+});
 
 async function copy() {
   const ok = await ClipboardManager.copyText(props.value);
@@ -41,7 +50,7 @@ function svgToPngBlob(size = 360) {
       canvas.width = size;
       canvas.height = size;
       const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = qrBg.value;
       ctx.fillRect(0, 0, size, size);
       ctx.drawImage(img, 0, 0, size, size);
       URL.revokeObjectURL(url);
@@ -106,8 +115,8 @@ async function downloadImage() {
     </div>
     <div v-if="showQr" ref="qrRef" class="qr-panel-canvas">
       <a-tooltip :title="t('copy')">
-        <a-qrcode class="qr-code" :value="value" :size="size" type="svg" :bordered="false" color="#000000"
-          bg-color="#ffffff" @click="copyImage" />
+        <a-qrcode class="qr-code" :value="value" :size="size" type="svg" :bordered="false"
+          :color="qrColor" :bg-color="qrBg" @click="copyImage" />
       </a-tooltip>
     </div>
   </div>
@@ -115,6 +124,7 @@ async function downloadImage() {
 
 <style scoped>
 .qr-panel {
+  color-scheme: only light;
   border: 1px solid rgba(128, 128, 128, 0.2);
   border-radius: 8px;
   padding: 10px;
@@ -143,7 +153,7 @@ async function downloadImage() {
 
 .qr-panel-canvas .qr-code {
   cursor: pointer;
-  background: #fff;
+  background: transparent;
   border-radius: 4px;
   line-height: 0;
 }

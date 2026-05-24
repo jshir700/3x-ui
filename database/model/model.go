@@ -49,21 +49,25 @@ type Inbound struct {
 	Total                int64                `json:"total" form:"total"`                                                                              // Total traffic limit in bytes
 	AllTime              int64                `json:"allTime" form:"allTime" gorm:"default:0"`                                                         // All-time traffic usage
 	Remark               string               `json:"remark" form:"remark"`                                                                            // Human-readable remark
-	Enable               bool                 `json:"enable" form:"enable" gorm:"index:idx_enable_traffic_reset,priority:1"`                           // Whether the inbound is enabled
+	Enable               bool                 `json:"enable" form:"enable" gorm:"default:true;index:idx_enable_traffic_reset,priority:1"`            // Whether the inbound is enabled
 	ExpiryTime           int64                `json:"expiryTime" form:"expiryTime"`                                                                    // Expiration timestamp
-	TrafficReset         string               `json:"trafficReset" form:"trafficReset" gorm:"default:never;index:idx_enable_traffic_reset,priority:2"` // Traffic reset schedule
+	TrafficReset         string               `json:"trafficReset" form:"trafficReset" gorm:"default:monthly;index:idx_enable_traffic_reset,priority:2"` // Traffic reset schedule
 	LastTrafficResetTime int64                `json:"lastTrafficResetTime" form:"lastTrafficResetTime" gorm:"default:0"`                               // Last traffic reset timestamp
 	ClientStats          []xray.ClientTraffic `gorm:"foreignKey:InboundId;references:Id" json:"clientStats" form:"clientStats"`                        // Client traffic statistics
 
 	// Xray configuration fields
+	SortOrder      int      `json:"sortOrder" form:"sortOrder" gorm:"default:999999999;index"`                                                             // Manual sort order (999999999 = unsorted, at end)
 	Listen         string   `json:"listen" form:"listen"`
 	Port           int      `json:"port" form:"port"`
 	Protocol       Protocol `json:"protocol" form:"protocol"`
 	Settings       string   `json:"settings" form:"settings"`
 	StreamSettings string   `json:"streamSettings" form:"streamSettings"`
-	Tag            string   `json:"tag" form:"tag" gorm:"unique"`
+	Tag            string   `json:"tag" form:"tag" gorm:"uniqueIndex:idx_tag_node;not null"`
 	Sniffing       string   `json:"sniffing" form:"sniffing"`
-	NodeID         *int     `json:"nodeId,omitempty" form:"nodeId" gorm:"index"`
+	ExternalAddr   string   `json:"externalAddr" form:"externalAddr"`                                       // Override export-link address ("" = use existing logic)
+	ExternalAddrTls bool    `json:"externalAddrTls" form:"externalAddrTls" gorm:"default:true"`             // Force TLS when externalAddr is set
+	ExternalPort   int      `json:"externalPort" form:"externalPort" gorm:"default:0"`                       // Override export-link port (0 = use existing logic)
+	NodeID         *int     `json:"nodeId,omitempty" form:"nodeId" gorm:"uniqueIndex:idx_tag_node;index"`
 }
 
 // OutboundTraffics tracks traffic statistics for Xray outbound connections.
@@ -105,10 +109,14 @@ func (i *Inbound) GenXrayInboundConfig() *xray.InboundConfig {
 		listen = "0.0.0.0"
 	}
 	listen = fmt.Sprintf("\"%v\"", listen)
+	protocol := string(i.Protocol)
+	if i.Protocol == Hysteria2 {
+		protocol = string(Hysteria)
+	}
 	return &xray.InboundConfig{
 		Listen:         json_util.RawMessage(listen),
 		Port:           i.Port,
-		Protocol:       string(i.Protocol),
+		Protocol:       protocol,
 		Settings:       json_util.RawMessage(i.Settings),
 		StreamSettings: json_util.RawMessage(i.StreamSettings),
 		Tag:            i.Tag,
@@ -155,6 +163,33 @@ type Node struct {
 	UpdatedAt int64 `json:"updatedAt" gorm:"autoUpdateTime"`
 }
 
+// Subscription represents a manually created subscription that aggregates multiple inbounds.
+type Subscription struct {
+	Id             int    `json:"id" gorm:"primaryKey;autoIncrement"`
+	SubId          string `json:"subId" gorm:"uniqueIndex;size:64;not null"`
+	Enable         bool   `json:"enable" gorm:"default:true"`
+	Format         string `json:"format" gorm:"size:16;default:base64"`
+	Password       string `json:"password" gorm:"size:256;default:''"`
+	InboundIds     string `json:"inboundIds" gorm:"type:text"`         // comma-separated inbound IDs in order
+	ExpiryTime     int64  `json:"expiryTime" gorm:"default:0"`         // 0 = never expires
+	ShowInfo       bool   `json:"showInfo" gorm:"default:true"`
+	EmailInRemark  bool   `json:"emailInRemark" gorm:"default:false"`
+	Title          string `json:"title" gorm:"size:256;default:''"`
+	SupportUrl     string `json:"supportUrl" gorm:"size:512;default:''"`
+	ProfileUrl     string `json:"profileUrl" gorm:"size:512;default:''"`
+	Announce       string `json:"announce" gorm:"type:text"`
+	UpdateInterval int    `json:"updateInterval" gorm:"default:12"`
+	Remark             string `json:"remark" gorm:"size:256;default:''"`
+	SyncWithInboundOrder bool `json:"syncWithInboundOrder" gorm:"default:false"`
+	AutoIncludeAllEnabled bool `json:"autoIncludeAllEnabled" gorm:"default:false"`
+	UserAgentEnabled   bool   `json:"userAgentEnabled" gorm:"default:false"`
+	UserAgentValues    string `json:"userAgentValues" gorm:"type:text;default:''"` // comma-separated
+	LastUsedAt         int64  `json:"lastUsedAt" gorm:"default:0"`
+	CallCount          int64  `json:"callCount" gorm:"default:0"`
+	CreatedAt          int64  `json:"createdAt" gorm:"autoCreateTime:milli"`
+	UpdatedAt          int64  `json:"updatedAt" gorm:"autoUpdateTime:milli"`
+}
+
 type CustomGeoResource struct {
 	Id            int    `json:"id" gorm:"primaryKey;autoIncrement"`
 	Type          string `json:"type" gorm:"not null;uniqueIndex:idx_custom_geo_type_alias;column:geo_type"`
@@ -173,21 +208,22 @@ type ClientReverse struct {
 
 // Client represents a client configuration for Xray inbounds with traffic limits and settings.
 type Client struct {
-	ID         string         `json:"id,omitempty"`                 // Unique client identifier
-	Security   string         `json:"security"`                     // Security method (e.g., "auto", "aes-128-gcm")
-	Password   string         `json:"password,omitempty"`           // Client password
-	Flow       string         `json:"flow,omitempty"`               // Flow control (XTLS)
-	Reverse    *ClientReverse `json:"reverse,omitempty"`            // VLESS simple reverse proxy settings
-	Auth       string         `json:"auth,omitempty"`               // Auth password (Hysteria)
-	Email      string         `json:"email"`                        // Client email identifier
-	LimitIP    int            `json:"limitIp"`                      // IP limit for this client
-	TotalGB    int64          `json:"totalGB" form:"totalGB"`       // Total traffic limit in GB
-	ExpiryTime int64          `json:"expiryTime" form:"expiryTime"` // Expiration timestamp
-	Enable     bool           `json:"enable" form:"enable"`         // Whether the client is enabled
-	TgID       int64          `json:"tgId" form:"tgId"`             // Telegram user ID for notifications
-	SubID      string         `json:"subId" form:"subId"`           // Subscription identifier
-	Comment    string         `json:"comment" form:"comment"`       // Client comment
-	Reset      int            `json:"reset" form:"reset"`           // Reset period in days
-	CreatedAt  int64          `json:"created_at,omitempty"`         // Creation timestamp
-	UpdatedAt  int64          `json:"updated_at,omitempty"`         // Last update timestamp
+	ClientID int            `json:"clientId,omitempty"`            // Per-inbound auto-incrementing stable ID (1‑based)
+	ID       string         `json:"id,omitempty"`                  // Unique client identifier
+	Security string         `json:"security"`                      // Security method (e.g., "auto", "aes-128-gcm")
+	Password string         `json:"password,omitempty"`            // Client password
+	Flow     string         `json:"flow,omitempty"`                // Flow control (XTLS)
+	Reverse  *ClientReverse `json:"reverse,omitempty"`             // VLESS simple reverse proxy settings
+	Auth     string         `json:"auth,omitempty"`                // Auth password (Hysteria)
+	Email    string         `json:"email"`                         // Client email identifier
+	LimitIP  int            `json:"limitIp"`                       // IP limit for this client
+	TotalGB  int64          `json:"totalGB" form:"totalGB"`        // Total traffic limit in GB
+	ExpiryTime int64        `json:"expiryTime" form:"expiryTime"`  // Expiration timestamp
+	Enable   bool           `json:"enable" form:"enable"`          // Whether the client is enabled
+	TgID     int64          `json:"tgId" form:"tgId"`              // Telegram user ID for notifications
+	SubID    string         `json:"subId" form:"subId"`            // Subscription identifier
+	Comment  string         `json:"comment" form:"comment"`        // Client comment
+	Reset    int            `json:"reset" form:"reset"`            // Reset period in days
+	CreatedAt int64         `json:"created_at,omitempty"`          // Creation timestamp
+	UpdatedAt int64         `json:"updated_at,omitempty"`          // Last update timestamp
 }

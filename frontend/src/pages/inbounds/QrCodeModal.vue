@@ -29,20 +29,6 @@ const activeKeys = ref([]);
 
 const qrItems = computed(() => {
   const items = [];
-  if (subLink.value) {
-    items.push({
-      key: 'sub',
-      header: t('subscription.title'),
-      value: subLink.value,
-    });
-  }
-  if (subJsonLink.value) {
-    items.push({
-      key: 'sub-json',
-      header: `${t('subscription.title')} (JSON)`,
-      value: subJsonLink.value,
-    });
-  }
   links.value.forEach((link, idx) => {
     items.push({
       key: `l${idx}`,
@@ -65,6 +51,20 @@ const qrItems = computed(() => {
       });
     }
   });
+  if (subLink.value) {
+    items.push({
+      key: 'sub',
+      header: t('subscription.title'),
+      value: subLink.value,
+    });
+  }
+  if (subJsonLink.value) {
+    items.push({
+      key: 'sub-json',
+      header: `${t('subscription.title')} (JSON)`,
+      value: subJsonLink.value,
+    });
+  }
   return items;
 });
 
@@ -97,7 +97,8 @@ watch(() => props.open, (next) => {
     subJsonLink.value = '';
   }
   const open = [];
-  if (subLink.value) open.push('sub');
+  const firstItem = qrItems.value.find(item => !item.key.startsWith('sub'));
+  if (firstItem) open.push(firstItem.key);
   activeKeys.value = open;
 });
 

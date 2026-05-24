@@ -66,6 +66,9 @@ export class AllSetting {
         this.subJsonMux = "";
         this.subJsonRules = "";
 
+        this.xrayAutoUpdate = true;
+        this.xrayUpdateCron = "0 30 2 * * *";
+
         this.timeLocation = "Local";
 
         // LDAP settings
@@ -93,6 +96,10 @@ export class AllSetting {
         this.hasTwoFactorToken = false;
         this.hasLdapPassword = false;
         this.hasApiToken = false;
+        this.subUriScheme = "https";
+        this.subUriAddress = "";
+        this.subUriPort = 443;
+        this.subUriPath = "/";
         this.hasWarpSecret = false;
         this.hasNordSecret = false;
 

@@ -34,6 +34,8 @@ func (a *NodeController) initRouter(g *gin.RouterGroup) {
 
 	g.POST("/test", a.test)
 	g.POST("/probe/:id", a.probe)
+	g.POST("/fetchSettings/:id", a.fetchSettings)
+	g.POST("/pushSettings/:id", a.pushSettings)
 	g.GET("/history/:id/:metric/:bucket", a.history)
 }
 
@@ -164,6 +166,38 @@ func (a *NodeController) probe(c *gin.Context) {
 	}
 	_ = a.nodeService.UpdateHeartbeat(id, patch)
 	jsonObj(c, patch.ToUI(probeErr == nil), nil)
+}
+
+func (a *NodeController) fetchSettings(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "get"), err)
+		return
+	}
+	settings, err := a.nodeService.FetchRemoteSettings(id)
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.obtain"), err)
+		return
+	}
+	jsonObj(c, settings, nil)
+}
+
+func (a *NodeController) pushSettings(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "get"), err)
+		return
+	}
+	var settings map[string]any
+	if err := c.ShouldBind(&settings); err != nil {
+		jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.update"), err)
+		return
+	}
+	if err := a.nodeService.PushRemoteSettings(id, settings); err != nil {
+		jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.update"), err)
+		return
+	}
+	jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.update"), nil)
 }
 
 func (a *NodeController) history(c *gin.Context) {

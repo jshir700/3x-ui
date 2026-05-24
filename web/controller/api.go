@@ -14,13 +14,14 @@ import (
 // APIController handles the main API routes for the 3x-ui panel, including inbounds and server management.
 type APIController struct {
 	BaseController
-	inboundController *InboundController
-	serverController  *ServerController
-	nodeController    *NodeController
-	settingService    service.SettingService
-	userService       service.UserService
-	apiTokenService   service.ApiTokenService
-	Tgbot             service.Tgbot
+	inboundController      *InboundController
+	serverController       *ServerController
+	nodeController         *NodeController
+	subscriptionController *SubscriptionController
+	settingService         service.SettingService
+	userService            service.UserService
+	apiTokenService        service.ApiTokenService
+	Tgbot                  service.Tgbot
 }
 
 // NewAPIController creates a new APIController instance and initializes its routes.
@@ -72,6 +73,10 @@ func (a *APIController) initRouter(g *gin.RouterGroup, customGeo *service.Custom
 	// Nodes API — multi-panel management
 	nodes := api.Group("/nodes")
 	a.nodeController = NewNodeController(nodes)
+
+	// Subscription API
+	subscriptions := api.Group("/subscription")
+	a.subscriptionController = NewSubscriptionController(subscriptions)
 
 	NewCustomGeoController(api.Group("/custom-geo"), customGeo)
 

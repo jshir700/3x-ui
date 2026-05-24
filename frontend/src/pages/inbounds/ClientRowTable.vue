@@ -11,7 +11,7 @@ import {
 } from '@ant-design/icons-vue';
 import { Modal } from 'ant-design-vue';
 
-import { SizeFormatter, IntlUtil, ColorUtils } from '@/utils';
+import { SizeFormatter, IntlUtil, ColorUtils, HttpUtil } from '@/utils';
 import InfinityIcon from '@/components/InfinityIcon.vue';
 import { useDatepicker } from '@/composables/useDatepicker.js';
 
@@ -34,6 +34,12 @@ const props = defineProps({
   pageSize: { type: Number, default: 0 },
   totalClientCount: { type: Number, default: 0 },
   statsVersion: { type: Number, default: 0 },
+  // Client selection state for export
+  selectedClientIds: { type: Array, default: () => [] },
+  // When true (default), auto-select the first client on mount/remount.
+  // Set false by the parent when the expand was triggered manually
+  // (chevron / card-head click) rather than by checkbox selection.
+  autoSelectFirst: { type: Boolean, default: true },
 });
 
 const emit = defineEmits([
@@ -44,6 +50,7 @@ const emit = defineEmits([
   'delete-client',
   'delete-clients',
   'toggle-enable-client',
+  'update:selected-client-ids',
 ]);
 
 const inbound = computed(() => props.dbInbound.toInbound());
@@ -168,14 +175,63 @@ function confirmReset(client) {
     onOk: () => emit('reset-traffic-client', { dbInbound: props.dbInbound, client }),
   });
 }
-function confirmDelete(client) {
+function getIntClientId(client) {
+  try {
+    const raw = typeof props.dbInbound.settings === 'string'
+      ? JSON.parse(props.dbInbound.settings)
+      : (props.dbInbound.settings || {});
+    const clients = raw.clients || [];
+    const email = client.email;
+    if (email) {
+      const found = clients.find(c => c.email === email);
+      if (found?.clientId) return found.clientId;
+    }
+    // Fallback: match by protocol-specific ID
+    const clientKey = client.id || client.password || client.auth;
+    if (clientKey) {
+      for (const c of clients) {
+        if (c.id === clientKey || c.password === clientKey || c.auth === clientKey) {
+          if (c.clientId) return c.clientId;
+        }
+      }
+    }
+  } catch (_e) { /* ignore */ }
+  return 0;
+}
+
+async function confirmDelete(client) {
+  const intId = getIntClientId(client);
+  let subRows = '';
+
+  if (intId > 0) {
+    try {
+      const resp = await HttpUtil.get(
+        `/panel/api/inbounds/checkClientSubscriptions/${props.dbInbound.id}/${intId}`,
+      );
+      if (resp?.success) {
+        const affected = resp.obj?.affected || [];
+        const toBeDeleted = resp.obj?.toBeDeleted || [];
+        const fmtSub = (s) => `${s.remark || s.subId} (${s.subId})`;
+        if (affected.length > 0) {
+          subRows += `${t('pages.inbounds.batch.subWillRemoveClient')}\n${affected.map(fmtSub).join(', ')}`;
+        }
+        if (toBeDeleted.length > 0) {
+          if (subRows) subRows += '\n\n';
+          subRows += `${t('pages.inbounds.batch.subWillDeleteClient')}\n${toBeDeleted.map(fmtSub).join(', ')}`;
+        }
+      }
+    } catch (_e) { /* proceed without subscription info */ }
+  }
+
+  const force = subRows !== '';
+
   Modal.confirm({
     title: `${t('pages.inbounds.deleteClient')} — ${client.email}`,
-    content: t('pages.inbounds.deleteClientContent'),
+    content: subRows || t('pages.inbounds.deleteClientContent'),
     okText: t('delete'),
     okType: 'danger',
     cancelText: t('cancel'),
-    onOk: () => emit('delete-client', { dbInbound: props.dbInbound, client }),
+    onOk: () => emit('delete-client', { dbInbound: props.dbInbound, client, force }),
   });
 }
 
@@ -185,42 +241,84 @@ function rowKey(client) {
   return client.email || client.id || client.password || JSON.stringify(client);
 }
 
-const selected = ref(new Set());
-
-const allSelected = computed(() =>
-  clients.value.length > 0 && clients.value.every((c) => selected.value.has(rowKey(c))),
-);
-const someSelected = computed(() =>
-  clients.value.some((c) => selected.value.has(rowKey(c))),
-);
-const selectedCount = computed(() => selected.value.size);
-
-function isSelected(key) {
-  return selected.value.has(key);
-}
-function toggleSelect(key, next) {
-  const s = new Set(selected.value);
-  if (next) s.add(key); else s.delete(key);
-  selected.value = s;
-}
-function selectAll(next) {
-  if (next) {
-    selected.value = new Set(clients.value.map(rowKey));
-  } else {
-    selected.value = new Set();
-  }
-}
-function clearSelection() {
-  selected.value = new Set();
-}
+// Selection state — uses rowKey(client) as the unique identifier instead of
+// client.clientId, because clientId can be 0 for multiple clients when the
+// stored settings JSON lacks "clientId" fields.  rowKey() falls through
+// email → id → password → JSON.stringify(client), guaranteeing uniqueness.
+//
+// The parent (InboundsPage) owns the authoritative selection (selectedClientIds)
+// for export filtering.  We propagate changes upward via update:selected-client-ids.
+// IMPORTANT: NO write-back watch on selectedClientIds — parent state is fed
+// one-way via emitSelection().  A re-entrant watch here causes a loop when
+// multiple clients share the same clientId (typically 0): emit → parent
+// → watch re-sets → emits again → …  Bug reproduced: toggling one client
+// re-selects all clients with clientId=0 and locks the UI.
+// Initialise from a direct ref and use an { immediate, first: true } watch
+// to guarantee localSelected is set even when clients already has its final
+// value during setup().  No emitSelection() here — parent already has
+// selectedClientIds[id] = [] which correctly means "all" for export.
+const localSelected = ref(new Set());
 
 watch(clients, (list) => {
-  if (selected.value.size === 0) return;
+  if (list.length === 0) return;
+  // Prune stale rowKeys (client was removed or the whole list refreshed).
   const valid = new Set(list.map(rowKey));
   const next = new Set();
-  for (const k of selected.value) if (valid.has(k)) next.add(k);
-  if (next.size !== selected.value.size) selected.value = next;
-});
+  for (const k of localSelected.value) if (valid.has(k)) next.add(k);
+  if (next.size !== localSelected.value.size) {
+    localSelected.value = next;
+    emitSelection();
+  }
+  // Auto-select first client on mount/remount when allowed by parent.
+  // Gated so that manual expand (chevron / card-head click) can suppress
+  // this, while checkbox-triggered expand still auto-selects.
+  if (localSelected.value.size === 0 && props.autoSelectFirst) {
+    const firstKey = rowKey(list[0]);
+    localSelected.value = new Set([firstKey]);
+    emitSelection();
+  }
+}, { immediate: true });
+
+function emitSelection() {
+  const selectedIds = Array.from(localSelected.value);
+  emit('update:selected-client-ids', selectedIds);
+}
+
+const allSelected = computed(() =>
+  clients.value.length > 0 && clients.value.every((c) => localSelected.value.has(rowKey(c))),
+);
+const someSelected = computed(() =>
+  clients.value.some((c) => localSelected.value.has(rowKey(c))),
+);
+const selectedCount = computed(() => localSelected.value.size);
+
+function isSelected(client) {
+  const result = localSelected.value.has(rowKey(client));
+  console.log('[CRT:isSelected] clientKey:', rowKey(client), 'result:', result, 'localSelected size:', localSelected.value.size);
+  return result;
+}
+function toggleSelect(client, next) {
+  const key = rowKey(client);
+  const has = localSelected.value.has(key);
+  if (next === has) return; // no actual change — suppress mount-time events
+  const s = new Set(localSelected.value);
+  if (next) s.add(key); else s.delete(key);
+  localSelected.value = s;
+  emitSelection();
+}
+function selectAll(next, e) {
+  if (!e?.isTrusted) return;
+  if (next) {
+    localSelected.value = new Set(clients.value.map(rowKey));
+  } else {
+    localSelected.value = new Set();
+  }
+  emitSelection();
+}
+function clearSelection() {
+  localSelected.value = new Set();
+  emitSelection();
+}
 
 const statsClient = ref(null);
 function openStats(client) {
@@ -231,7 +329,7 @@ function closeStats() {
 }
 
 function confirmBulkDelete() {
-  const picked = clients.value.filter((c) => selected.value.has(rowKey(c)));
+  const picked = clients.value.filter((c) => localSelected.value.has(rowKey(c)));
   if (picked.length === 0) return;
 
   const total = clients.value.length;
@@ -278,8 +376,8 @@ function confirmBulkDelete() {
     <template v-if="!isMobile">
       <div class="client-row client-list-header">
         <div v-if="isRemovable" class="cell cell-select">
-          <a-checkbox :checked="allSelected" :indeterminate="someSelected && !allSelected"
-            @change="(e) => selectAll(e.target.checked)" />
+          <a-checkbox :checked="allSelected"
+            @click="(e) => selectAll(e.target.checked, e)" />
         </div>
         <div class="cell cell-actions">{{ t('pages.settings.actions') }}</div>
         <div class="cell cell-enable">{{ t('enable') }}</div>
@@ -292,10 +390,10 @@ function confirmBulkDelete() {
       </div>
 
       <div v-for="client in paginatedClients" :key="rowKey(client)" class="client-row"
-        :class="{ 'is-selected': isSelected(rowKey(client)) }">
+        :class="{ 'is-selected': isSelected(client) }">
         <div v-if="isRemovable" class="cell cell-select">
-          <a-checkbox :checked="isSelected(rowKey(client))"
-            @change="(e) => toggleSelect(rowKey(client), e.target.checked)" />
+          <a-checkbox :checked="isSelected(client)"
+            @click="(e) => toggleSelect(client, e.target.checked)" />
         </div>
         <div class="cell cell-actions">
           <a-tooltip v-if="dbInbound.hasLink()" :title="t('qrCode')">
@@ -429,10 +527,10 @@ function confirmBulkDelete() {
     <!-- ====================== Mobile: card list ======================= -->
     <template v-else>
       <div v-for="client in paginatedClients" :key="rowKey(client)" class="client-card"
-        :class="{ 'is-selected': isSelected(rowKey(client)) }">
+        :class="{ 'is-selected': isSelected(client) }">
         <div class="client-card-head">
-          <a-checkbox v-if="isRemovable" :checked="isSelected(rowKey(client))"
-            @change="(e) => toggleSelect(rowKey(client), e.target.checked)" />
+          <a-checkbox v-if="isRemovable" :checked="isSelected(client)"
+            @click="(e) => toggleSelect(client, e.target.checked)" />
           <a-tooltip>
             <template #title>
               <template v-if="isClientDepleted(client.email)">{{ t('depleted') }}</template>
@@ -535,21 +633,21 @@ function confirmBulkDelete() {
 <style scoped>
 .client-list {
   margin: -8px 0;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .bulk-bar {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 6px 16px;
+  padding: 4px 16px;
   background: rgba(22, 119, 255, 0.08);
   border-bottom: 1px solid rgba(22, 119, 255, 0.18);
 }
 
 .bulk-count {
   font-weight: 500;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .is-selected {
@@ -567,19 +665,19 @@ function confirmBulkDelete() {
     /* enable */
     80px
     /* online */
-    minmax(160px, 2fr)
+    minmax(140px, auto)
     /* client identity */
-    minmax(160px, 2fr)
-    /* traffic */
-    130px
+    minmax(150px, 1fr)
+    /* traffic — fills remaining space */
+    105px
     /* all-time */
-    130px
+    105px
     /* remained */
     140px;
   /* expiry */
-  gap: 12px;
+  gap: 8px;
   align-items: center;
-  padding: 8px 16px;
+  padding: 4px 16px;
   border-top: 1px solid rgba(128, 128, 128, 0.12);
 }
 
@@ -593,13 +691,13 @@ function confirmBulkDelete() {
     /* enable */
     80px
     /* online */
-    minmax(160px, 2fr)
+    minmax(140px, auto)
     /* client identity */
-    minmax(160px, 2fr)
-    /* traffic */
-    130px
+    minmax(150px, 1fr)
+    /* traffic — fills remaining space */
+    105px
     /* all-time */
-    130px
+    105px
     /* remained */
     140px;
   /* expiry */
@@ -611,10 +709,10 @@ function confirmBulkDelete() {
 
 .client-list-header {
   font-weight: 500;
-  font-size: 12px;
+  font-size: 11px;
   opacity: 0.65;
-  padding-top: 6px;
-  padding-bottom: 6px;
+  padding-top: 4px;
+  padding-bottom: 4px;
   border-top: none;
   text-transform: uppercase;
   letter-spacing: 0.02em;
@@ -666,7 +764,7 @@ function confirmBulkDelete() {
 
 /* Action icons */
 .row-icon {
-  font-size: 16px;
+  font-size: 14px;
   cursor: pointer;
   padding: 0 2px;
   color: inherit;
@@ -740,6 +838,7 @@ function confirmBulkDelete() {
  * sits flush against the inbound row's left/right edges. */
 :deep(.ant-table-expanded-row > .ant-table-cell) {
   padding: 0 !important;
+  overflow-x: hidden;
 }
 
 .client-list-pagination {

@@ -24,14 +24,19 @@ export class DBInbound {
         this.streamSettings = "";
         this.tag = "";
         this.sniffing = "";
-        this.clientStats = ""
-        // Optional FK to web/runtime registered Node. null/undefined =
-        // local panel; otherwise the inbound lives on the named node.
-        this.nodeId = null;
-        if (data == null) {
-            return;
-        }
-        ObjectUtil.cloneProps(this, data);
+		this.clientStats = ""
+		// Optional FK to web/runtime registered Node. null/undefined =
+		// local panel; otherwise the inbound lives on the named node.
+		this.nodeId = null;
+		this.externalAddr = "";
+		this.externalAddrTls = true;
+		this.externalPort = null;
+		if (data == null) {
+		    return;
+		}
+		ObjectUtil.cloneProps(this, data);
+		// externalPort=0 与空值同义（Go int 不能为 nil），统一转 null 使输入框显示为空
+		if (this.externalPort === 0) this.externalPort = null;
     }
 
     get totalGB() {
@@ -113,31 +118,60 @@ export class DBInbound {
 
         let settings = {};
         if (!ObjectUtil.isEmpty(this.settings)) {
-            settings = JSON.parse(this.settings);
+            try {
+                settings = JSON.parse(this.settings);
+            } catch (_e) {
+                console.warn('[DBInbound] invalid settings JSON:', this.id, this.remark);
+            }
         }
 
         let streamSettings = {};
         if (!ObjectUtil.isEmpty(this.streamSettings)) {
-            streamSettings = JSON.parse(this.streamSettings);
+            try {
+                streamSettings = JSON.parse(this.streamSettings);
+            } catch (_e) {
+                console.warn('[DBInbound] invalid streamSettings JSON:', this.id, this.remark);
+            }
         }
 
         let sniffing = {};
         if (!ObjectUtil.isEmpty(this.sniffing)) {
-            sniffing = JSON.parse(this.sniffing);
+            try {
+                sniffing = JSON.parse(this.sniffing);
+            } catch (_e) {
+                console.warn('[DBInbound] invalid sniffing JSON:', this.id, this.remark);
+            }
         }
 
-        const config = {
-            port: this.port,
-            listen: this.listen,
-            protocol: this.protocol,
-            settings: settings,
-            streamSettings: streamSettings,
-            tag: this.tag,
-            sniffing: sniffing,
-            clientStats: this.clientStats,
-        };
+		const config = {
+		    port: this.port,
+		    listen: this.listen,
+		    protocol: this.protocol,
+		    settings: settings,
+		    streamSettings: streamSettings,
+		    tag: this.tag,
+		    sniffing: sniffing,
+		    clientStats: this.clientStats,
+		    externalAddr: this.externalAddr,
+		    externalPort: this.externalPort,
+		};
 
-        this._cachedInbound = Inbound.fromJson(config);
+        try {
+            this._cachedInbound = Inbound.fromJson(config);
+        } catch (_e) {
+            console.warn('[DBInbound] Inbound.fromJson failed:', this.id, this.remark, _e.message);
+            try {
+                this._cachedInbound = Inbound.fromJson({
+                    port: this.port,
+                    protocol: this.protocol,
+                    settings: {},
+                    tag: this.tag,
+                });
+            } catch (_e2) {
+                console.warn('[DBInbound] fallback fromJson also failed:', this.id, this.remark, _e2.message);
+                this._cachedInbound = new Inbound(this.port, '', this.protocol, null, undefined, this.tag);
+            }
+        }
         return this._cachedInbound;
     }
 
@@ -180,8 +214,8 @@ export class DBInbound {
         }
     }
 
-    genInboundLinks(remarkModel, hostOverride = '') {
+    genInboundLinks(remarkModel, hostOverride = '', selectedClientIds = null) {
         const inbound = this.toInbound();
-        return inbound.genInboundLinks(this.remark, remarkModel, hostOverride);
+        return inbound.genInboundLinks(this.remark, remarkModel, hostOverride, selectedClientIds);
     }
 }

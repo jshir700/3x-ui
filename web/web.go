@@ -316,6 +316,16 @@ func (s *Server) startTask(restartXray bool) {
 		s.cron.AddJob(runtime, j)
 	}
 
+	// Xray auto-update scheduling
+	xrayUpdateCron, err := s.settingService.GetXrayUpdateCron()
+	if err != nil || xrayUpdateCron == "" {
+		xrayUpdateCron = "0 30 2 * * *"
+	}
+	_, err = s.cron.AddJob(xrayUpdateCron, job.NewXrayUpdateJob())
+	if err != nil {
+		logger.Warningf("Add XrayUpdateJob: failed to schedule %q: %v", xrayUpdateCron, err)
+	}
+
 	// Make a traffic condition every day, 8:30
 	var entry cron.EntryID
 	isTgbotenabled, err := s.settingService.GetTgbotEnabled()

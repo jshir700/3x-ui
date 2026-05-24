@@ -645,6 +645,10 @@ func (s *ServerService) downloadXRay(version string) (string, error) {
 	return path, nil
 }
 
+func (s *ServerService) GetCurrentXrayVersion() string {
+	return s.xrayService.GetXrayVersion()
+}
+
 func (s *ServerService) UpdateXray(version string) error {
 	versions, err := s.GetXrayVersions()
 	if err != nil {
@@ -652,6 +656,12 @@ func (s *ServerService) UpdateXray(version string) error {
 	}
 	if !slices.Contains(versions, version) {
 		return fmt.Errorf("xray version %q is not in the fetched release list", version)
+	}
+
+	currentVersion := s.GetCurrentXrayVersion()
+	if currentVersion != "Unknown" && currentVersion == version {
+		logger.Infof("Xray already at version %s, skipping update", version)
+		return nil
 	}
 
 	// 1. Stop xray before doing anything

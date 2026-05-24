@@ -231,11 +231,12 @@ func (s *SubService) genVmessLink(inbound *model.Inbound, email string) string {
 	if inbound.Protocol != model.VMESS {
 		return ""
 	}
-	address := s.resolveInboundAddress(inbound)
+	address := s.resolveAddress(inbound)
+	port := s.resolvePort(inbound)
 	obj := map[string]any{
 		"v":    "2",
 		"add":  address,
-		"port": inbound.Port,
+		"port": port,
 		"type": "none",
 	}
 	stream := unmarshalStreamSettings(inbound.StreamSettings)
@@ -269,12 +270,12 @@ func (s *SubService) genVlessLink(inbound *model.Inbound, email string) string {
 	if inbound.Protocol != model.VLESS {
 		return ""
 	}
-	address := s.resolveInboundAddress(inbound)
+	address := s.resolveAddress(inbound)
+	port := s.resolvePort(inbound)
 	stream := unmarshalStreamSettings(inbound.StreamSettings)
 	clients, _ := s.inboundService.GetClients(inbound)
 	clientIndex := findClientIndex(clients, email)
 	uuid := clients[clientIndex].ID
-	port := inbound.Port
 	streamNetwork := stream["network"].(string)
 	params := make(map[string]string)
 	params["type"] = streamNetwork
@@ -330,12 +331,12 @@ func (s *SubService) genTrojanLink(inbound *model.Inbound, email string) string 
 	if inbound.Protocol != model.Trojan {
 		return ""
 	}
-	address := s.resolveInboundAddress(inbound)
+	address := s.resolveAddress(inbound)
+	port := s.resolvePort(inbound)
 	stream := unmarshalStreamSettings(inbound.StreamSettings)
 	clients, _ := s.inboundService.GetClients(inbound)
 	clientIndex := findClientIndex(clients, email)
 	password := clients[clientIndex].Password
-	port := inbound.Port
 	streamNetwork := stream["network"].(string)
 	params := make(map[string]string)
 	params["type"] = streamNetwork
@@ -381,16 +382,29 @@ func (s *SubService) genShadowsocksLink(inbound *model.Inbound, email string) st
 	if inbound.Protocol != model.Shadowsocks {
 		return ""
 	}
-	address := s.resolveInboundAddress(inbound)
+	address := s.resolveAddress(inbound)
+	port := s.resolvePort(inbound)
 	stream := unmarshalStreamSettings(inbound.StreamSettings)
 	clients, _ := s.inboundService.GetClients(inbound)
 
 	var settings map[string]any
 	json.Unmarshal([]byte(inbound.Settings), &settings)
-	inboundPassword := settings["password"].(string)
-	method := settings["method"].(string)
+
 	clientIndex := findClientIndex(clients, email)
-	streamNetwork := stream["network"].(string)
+	// Method: read from settings top-level, fall back to default
+	method := "chacha20-ietf-poly1305"
+	if m, ok := settings["method"].(string); ok && m != "" {
+		method = m
+	}
+	// Password: use client object
+	password := clients[clientIndex].Password
+	if pwd, ok := settings["password"].(string); ok && pwd != "" {
+		password = pwd
+	}
+	streamNetwork := ""
+	if sn, ok := stream["network"].(string); ok {
+		streamNetwork = sn
+	}
 	params := make(map[string]string)
 	params["type"] = streamNetwork
 
@@ -404,9 +418,10 @@ func (s *SubService) genShadowsocksLink(inbound *model.Inbound, email string) st
 		applyShareTLSParams(stream, params)
 	}
 
-	encPart := fmt.Sprintf("%s:%s", method, clients[clientIndex].Password)
-	if method[0] == '2' {
-		encPart = fmt.Sprintf("%s:%s:%s", method, inboundPassword, clients[clientIndex].Password)
+	encPart := fmt.Sprintf("%s:%s", method, password)
+	if len(method) > 0 && method[0] == '2' {
+		inboundPassword, _ := settings["password"].(string)
+		encPart = fmt.Sprintf("%s:%s:%s", method, inboundPassword, password)
 	}
 
 	externalProxies, _ := stream["externalProxy"].([]any)
@@ -427,7 +442,7 @@ func (s *SubService) genShadowsocksLink(inbound *model.Inbound, email string) st
 		)
 	}
 
-	link := fmt.Sprintf("ss://%s@%s:%d", base64.StdEncoding.EncodeToString([]byte(encPart)), address, inbound.Port)
+	link := fmt.Sprintf("ss://%s@%s:%d", base64.StdEncoding.EncodeToString([]byte(encPart)), address, port)
 	return buildLinkWithParams(link, params, s.genRemark(inbound, email, ""))
 }
 
@@ -435,6 +450,8 @@ func (s *SubService) genHysteriaLink(inbound *model.Inbound, email string) strin
 	if !model.IsHysteria(inbound.Protocol) {
 		return ""
 	}
+	address := s.resolveAddress(inbound)
+	port := s.resolvePort(inbound)
 	var stream map[string]any
 	json.Unmarshal([]byte(inbound.StreamSettings), &stream)
 	clients, _ := s.inboundService.GetClients(inbound)
@@ -536,8 +553,8 @@ func (s *SubService) genHysteriaLink(inbound *model.Inbound, email string) strin
 		return strings.Join(links, "\n")
 	}
 
-	// No external proxy configured — fall back to the request host.
-	link := fmt.Sprintf("%s://%s@%s:%d", protocol, auth, s.address, inbound.Port)
+	// No external proxy configured — use resolved address/port.
+	link := fmt.Sprintf("%s://%s@%s:%d", protocol, auth, address, port)
 	url, _ := url.Parse(link)
 	q := url.Query()
 	for k, v := range params {
@@ -585,6 +602,24 @@ func (s *SubService) resolveInboundAddress(inbound *model.Inbound) string {
 		return s.address
 	}
 	return inbound.Listen
+}
+
+// resolveAddress returns the effective address for an inbound, checking externalAddr first.
+func (s *SubService) resolveAddress(inbound *model.Inbound) string {
+	stream := unmarshalStreamSettings(inbound.StreamSettings)
+	if addr, ok := stream["externalAddr"].(string); ok && addr != "" {
+		return addr
+	}
+	return s.resolveInboundAddress(inbound)
+}
+
+// resolvePort returns the effective port for an inbound, checking externalPort first.
+func (s *SubService) resolvePort(inbound *model.Inbound) int {
+	stream := unmarshalStreamSettings(inbound.StreamSettings)
+	if ep, ok := stream["externalPort"].(float64); ok && ep > 0 {
+		return int(ep)
+	}
+	return inbound.Port
 }
 
 func findClientIndex(clients []model.Client, email string) int {
@@ -1431,6 +1466,7 @@ type PageData struct {
 	Host          string
 	BasePath      string
 	SId           string
+	Format        string
 	Enabled       bool
 	Download      string
 	Upload        string
@@ -1447,8 +1483,12 @@ type PageData struct {
 	SubJsonUrl    string
 	SubClashUrl   string
 	SubTitle      string
-	SubSupportUrl string
-	Result        []string
+	SubSupportUrl  string
+	SubProfileUrl  string
+	Announce       string
+	UpdateInterval int
+	CallCount      int64
+	Result         []string
 }
 
 // ResolveRequest extracts scheme and host info from request/headers consistently.
@@ -1562,7 +1602,7 @@ func (s *SubService) joinPathWithID(basePath, subId string) string {
 
 // BuildPageData parses header and prepares the template view model.
 // BuildPageData constructs page data for rendering the subscription information page.
-func (s *SubService) BuildPageData(subId string, hostHeader string, traffic xray.ClientTraffic, lastOnline int64, subs []string, subURL, subJsonURL, subClashURL string, basePath string, subTitle string, subSupportUrl string) PageData {
+func (s *SubService) BuildPageData(subId string, hostHeader string, traffic xray.ClientTraffic, lastOnline int64, subs []string, subURL, subJsonURL, subClashURL string, basePath string, subTitle string, subSupportUrl string, subProfileUrl string, announce string, updateInterval int, callCount int64, format string) PageData {
 	download := common.FormatTraffic(traffic.Down)
 	upload := common.FormatTraffic(traffic.Up)
 	total := "∞"
@@ -1583,6 +1623,7 @@ func (s *SubService) BuildPageData(subId string, hostHeader string, traffic xray
 		Host:          hostHeader,
 		BasePath:      basePath,
 		SId:           subId,
+		Format:        format,
 		Enabled:       traffic.Enable,
 		Download:      download,
 		Upload:        upload,
@@ -1598,9 +1639,13 @@ func (s *SubService) BuildPageData(subId string, hostHeader string, traffic xray
 		SubUrl:        subURL,
 		SubJsonUrl:    subJsonURL,
 		SubClashUrl:   subClashURL,
-		SubTitle:      subTitle,
-		SubSupportUrl: subSupportUrl,
-		Result:        subs,
+		SubTitle:       subTitle,
+		SubSupportUrl:  subSupportUrl,
+		SubProfileUrl:  subProfileUrl,
+		Announce:       announce,
+		UpdateInterval: updateInterval,
+		CallCount:      callCount,
+		Result:         subs,
 	}
 }
 

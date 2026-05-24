@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
   EditOutlined,
@@ -30,6 +30,35 @@ const emit = defineEmits([
 ]);
 
 const { t } = useI18n();
+
+const tableScrollY = ref(500);
+const tableWrapperRef = ref(null);
+let tableRo = null;
+
+function calcTableScrollY() {
+  const el = tableWrapperRef.value?.$el || tableWrapperRef.value;
+  if (el) {
+    tableScrollY.value = Math.max(300, window.innerHeight - el.getBoundingClientRect().top - 55);
+  } else {
+    tableScrollY.value = Math.max(300, window.innerHeight - 300);
+  }
+}
+
+onMounted(() => {
+  nextTick(() => {
+    const el = tableWrapperRef.value?.$el || tableWrapperRef.value;
+    if (el) {
+      tableRo = new ResizeObserver(() => calcTableScrollY());
+      tableRo.observe(el);
+    }
+    calcTableScrollY();
+  });
+  window.addEventListener('resize', calcTableScrollY);
+});
+onUnmounted(() => {
+  tableRo?.disconnect();
+  window.removeEventListener('resize', calcTableScrollY);
+});
 
 const dataSource = computed(() =>
   props.nodes.map((n) => ({
@@ -151,7 +180,7 @@ function isExpanded(id) {
       :title="statsNode ? statsNode.name : ''" @cancel="closeStats">
       <div v-if="statsNode" class="card-stats">
         <div v-if="statsNode.remark" class="stat-row">
-          <span class="stat-label">{{ t('pages.nodes.name') }}</span>
+          <span class="stat-label">{{ t('pages.nodes.remark') }}</span>
           <span>{{ statsNode.remark }}</span>
         </div>
         <div class="stat-row">
@@ -203,7 +232,7 @@ function isExpanded(id) {
     </a-modal>
 
     <!-- ====================== Desktop: a-table ======================== -->
-    <a-table v-else :data-source="dataSource" :pagination="false" :loading="loading" :scroll="{ x: 'max-content' }"
+    <a-table ref="tableWrapperRef" v-else :data-source="dataSource" :pagination="false" :loading="loading" :scroll="{ x: 'max-content', y: tableScrollY }"
       size="middle" row-key="id">
       <template #expandedRowRender="{ record }">
         <NodeHistoryPanel :node="record" />

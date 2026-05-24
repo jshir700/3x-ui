@@ -1,10 +1,8 @@
 <script setup>
 import { ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 
-// Generic prompt modal — used by features like "import inbound" that
-// need a free-form text/textarea input and a confirm callback. The
-// parent owns the action; this component only surfaces the value via
-// the `confirm` event when the user clicks OK.
+const { t } = useI18n();
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -43,7 +41,7 @@ function onKeydown(e) {
 </script>
 
 <template>
-  <a-modal :open="open" :title="title" :ok-text="okText" cancel-text="Cancel" :mask-closable="false"
+  <a-modal :open="open" :title="title" :ok-text="okText" :cancel-text="t('subCancel')" :mask-closable="false"
     :confirm-loading="loading" @ok="ok" @cancel="close">
     <a-textarea v-if="type === 'textarea'" v-model:value="value" :auto-size="{ minRows: 10, maxRows: 20 }" autofocus
       @keydown="onKeydown" />

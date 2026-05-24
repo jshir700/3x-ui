@@ -1535,6 +1535,8 @@ export class Inbound extends XrayCommonClass {
         tag = '',
         sniffing = new Sniffing(),
         clientStats = '',
+        externalAddr = '',
+        externalPort = 0,
     ) {
         super();
         this.port = port;
@@ -1545,6 +1547,8 @@ export class Inbound extends XrayCommonClass {
         this.tag = tag;
         this.sniffing = sniffing;
         this.clientStats = clientStats;
+        this.externalAddr = externalAddr;
+        this.externalPort = externalPort;
     }
     getClientStats() {
         return this.clientStats;
@@ -2307,6 +2311,7 @@ export class Inbound extends XrayCommonClass {
     // Centralised so genAllLinks/genInboundLinks/genWireguard*
     // all share the same chain — pre-Phase 3 we had four duplicated lines.
     _resolveAddr(hostOverride = '') {
+        if (this.externalAddr) return this.externalAddr;
         if (hostOverride) return hostOverride;
         if (!ObjectUtil.isEmpty(this.listen) && this.listen !== "0.0.0.0") return this.listen;
         return location.hostname;
@@ -2352,7 +2357,7 @@ export class Inbound extends XrayCommonClass {
         let result = [];
         let email = client ? client.email : '';
         let addr = this._resolveAddr(hostOverride);
-        let port = this.port;
+        let port = this.externalPort > 0 ? this.externalPort : this.port;
         const separationChar = remarkModel.charAt(0);
         const orderChars = remarkModel.slice(1);
         let orders = {
@@ -2362,9 +2367,10 @@ export class Inbound extends XrayCommonClass {
         };
         if (ObjectUtil.isArrEmpty(this.stream.externalProxy)) {
             let r = orderChars.split('').map(char => orders[char]).filter(x => x.length > 0).join(separationChar);
+            const tlsFlag = this.externalAddr && this.externalAddrTls ? 'tls' : 'same';
             result.push({
                 remark: r,
-                link: this.genLink(addr, port, 'same', r, client)
+                link: this.genLink(addr, port, tlsFlag, r, client)
             });
         } else {
             this.stream.externalProxy.forEach((ep) => {
@@ -2379,18 +2385,24 @@ export class Inbound extends XrayCommonClass {
         return result;
     }
 
-    genInboundLinks(remark = '', remarkModel = '-ieo', hostOverride = '') {
+    genInboundLinks(remark = '', remarkModel = '-ieo', hostOverride = '', selectedClientIds = null) {
         let addr = this._resolveAddr(hostOverride);
+        let port = this.externalPort > 0 ? this.externalPort : this.port;
         if (this.clients) {
             let links = [];
+            // rowKey() logic matching ClientRowTable.vue — clientId is never
+            // set by the ClientBase constructor so we use email / id / password.
+            const filterSet = selectedClientIds ? new Set(selectedClientIds) : null;
             this.clients.forEach((client) => {
+                const key = client.email || client.id || client.password || JSON.stringify(client);
+                if (filterSet && !filterSet.has(key)) return;
                 this.genAllLinks(remark, remarkModel, client, hostOverride).forEach(l => {
                     links.push(l.link);
                 })
             });
             return links.join('\r\n');
         } else {
-            if (this.protocol == Protocols.SHADOWSOCKS && !this.isSSMultiUser) return this.genSSLink(addr, this.port, 'same', remark);
+            if (this.protocol == Protocols.SHADOWSOCKS && !this.isSSMultiUser) return this.genSSLink(addr, port, 'same', remark);
             if (this.protocol == Protocols.WIREGUARD) {
                 return this.genWireguardConfigs(remark, remarkModel, hostOverride);
             }
@@ -2407,7 +2419,9 @@ export class Inbound extends XrayCommonClass {
             StreamSettings.fromJson(json.streamSettings),
             json.tag,
             Sniffing.fromJson(json.sniffing),
-            json.clientStats
+            json.clientStats,
+            json.externalAddr,
+            json.externalPort,
         )
     }
 
@@ -2422,7 +2436,9 @@ export class Inbound extends XrayCommonClass {
             settings: this.settings instanceof XrayCommonClass ? this.settings.toJson() : this.settings,
             tag: this.tag,
             sniffing: this.sniffing.toJson(),
-            clientStats: this.clientStats
+            clientStats: this.clientStats,
+            externalAddr: this.externalAddr,
+            externalPort: this.externalPort,
         };
 
         // Only add streamSettings if protocol supports it
@@ -2722,7 +2738,7 @@ Inbound.VLESSSettings = class extends Inbound.Settings {
 Inbound.VLESSSettings.VLESS = class extends Inbound.ClientBase {
     constructor(
         id = RandomUtil.randomUUID(),
-        flow = '',
+        flow = TLS_FLOW_CONTROL.VISION,
         reverseTag = '',
         reverseSniffing = new Sniffing(),
         email, limitIp, totalGB, expiryTime, enable, tgId, subId, comment, reset, created_at, updated_at,
@@ -3094,16 +3110,17 @@ Inbound.HttpSettings = class extends Inbound.Settings {
     }
 
     static fromJson(json = {}) {
+        const clients = json.clients || json.accounts || [];
         return new Inbound.HttpSettings(
             Protocols.HTTP,
-            json.accounts.map(account => Inbound.HttpSettings.HttpAccount.fromJson(account)),
+            clients.map(account => Inbound.HttpSettings.HttpAccount.fromJson(account)),
             json.allowTransparent,
         );
     }
 
     toJson() {
         return {
-            accounts: Inbound.HttpSettings.toJsonArray(this.accounts),
+            clients: Inbound.HttpSettings.toJsonArray(this.accounts),
             allowTransparent: this.allowTransparent,
         };
     }
@@ -3146,11 +3163,12 @@ Inbound.WireguardSettings = class extends XrayCommonClass {
     }
 
     static fromJson(json = {}) {
+        const peers = json.peers || [];
         return new Inbound.WireguardSettings(
             Protocols.WIREGUARD,
             json.mtu,
             json.secretKey,
-            json.peers.map(peer => Inbound.WireguardSettings.Peer.fromJson(peer)),
+            peers.map(peer => Inbound.WireguardSettings.Peer.fromJson(peer)),
             json.noKernelTun,
         );
     }

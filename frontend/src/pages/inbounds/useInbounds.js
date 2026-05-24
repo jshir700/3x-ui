@@ -38,6 +38,7 @@ export function useInbounds() {
     subURI: '',
     subJsonURI: '',
     subJsonEnable: false,
+    subEmailInRemark: true,
   });
   const remarkModel = ref('-ieo');
   const datepicker = ref('gregorian');
@@ -148,6 +149,7 @@ export function useInbounds() {
       subURI: s.subURI || '',
       subJsonURI: s.subJsonURI || '',
       subJsonEnable: !!s.subJsonEnable,
+      subEmailInRemark: s.subEmailInRemark !== false && s.subEmailInRemark !== "false",
     };
     pageSize.value = s.pageSize ?? 0;
     remarkModel.value = s.remarkModel || '-ieo';
@@ -197,7 +199,6 @@ export function useInbounds() {
         if (typeof upd.down === 'number') ib.down = upd.down;
         if (typeof upd.allTime === 'number') ib.allTime = upd.allTime;
         if (typeof upd.total === 'number') ib.total = upd.total;
-        if (typeof upd.enable === 'boolean') ib.enable = upd.enable;
         touched = true;
       }
     }
@@ -238,6 +239,10 @@ export function useInbounds() {
   function applyInvalidate(payload) {
     if (!payload || typeof payload !== 'object') return;
     if (payload.type === 'inbounds') {
+      // Suppress refresh when we just triggered setEnable ourselves and
+      // the invalidate is merely a cross-admin sync side-effect. The
+      // optimistic update + API response are sufficient for our own UI.
+      if (window.__skipNextInvalidate && window.__skipNextInvalidate()) return;
       refresh();
     }
   }

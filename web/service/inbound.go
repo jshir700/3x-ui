@@ -124,7 +124,7 @@ func (s *InboundService) enrichClientStats(db *gorm.DB, inbounds []*model.Inboun
 func (s *InboundService) GetInbounds(userId int) ([]*model.Inbound, error) {
 	db := database.GetDB()
 	var inbounds []*model.Inbound
-	err := db.Model(model.Inbound{}).Preload("ClientStats").Where("user_id = ?", userId).Find(&inbounds).Error
+	err := db.Model(model.Inbound{}).Preload("ClientStats").Where("user_id = ?", userId).Order("sort_order ASC, id ASC").Find(&inbounds).Error
 	if err != nil && err != gorm.ErrRecordNotFound {
 		return nil, err
 	}
@@ -154,6 +154,26 @@ func (s *InboundService) GetInboundsByTrafficReset(period string) ([]*model.Inbo
 	return inbounds, nil
 }
 
+func (s *InboundService) ReorderInbounds(ids []int) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	db := database.GetDB()
+	tx := db.Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+	for i, id := range ids {
+		if err := tx.Model(&model.Inbound{}).Where("id = ?", id).Update("sort_order", (i+1)*10).Error; err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit().Error
+}
+
 func (s *InboundService) GetClients(inbound *model.Inbound) ([]model.Client, error) {
 	settings := map[string][]model.Client{}
 	json.Unmarshal([]byte(inbound.Settings), &settings)
@@ -165,7 +185,126 @@ func (s *InboundService) GetClients(inbound *model.Inbound) ([]model.Client, err
 	if clients == nil {
 		return nil, nil
 	}
+	// Auto-assign clientId in-memory only — do NOT write back to DB here
+	for i := range clients {
+		if clients[i].ClientID == 0 {
+			clients[i].ClientID = s.allocateClientId(clients)
+		}
+	}
 	return clients, nil
+}
+
+// allocateClientId returns the next free clientId for a slice of clients (1‑based, never reuses)
+func (s *InboundService) allocateClientId(clients []model.Client) int {
+	maxId := 0
+	for _, c := range clients {
+		if c.ClientID > maxId {
+			maxId = c.ClientID
+		}
+	}
+	return maxId + 1
+}
+
+// ensureClientIdsInJSON ensures every entry in settings.clients, .accounts and .peers
+// has a ClientID. Called when saving an inbound.
+func (s *InboundService) ensureClientIdsInSettings(inbound *model.Inbound) error {
+	var settings map[string]any
+	if err := json.Unmarshal([]byte(inbound.Settings), &settings); err != nil {
+		return err
+	}
+	changed := false
+	// clients[]
+	if clientsArr, ok := settings["clients"].([]any); ok {
+		maxId := 0
+		for _, raw := range clientsArr {
+			if c, ok := raw.(map[string]any); ok {
+				if id, exists := c["clientId"]; exists {
+					if f, ok := id.(float64); ok && int(f) > maxId {
+						maxId = int(f)
+					}
+				}
+			}
+		}
+		for _, raw := range clientsArr {
+			if c, ok := raw.(map[string]any); ok {
+				if _, exists := c["clientId"]; !exists || c["clientId"] == nil || c["clientId"] == 0 {
+					maxId++
+					c["clientId"] = maxId
+					changed = true
+				}
+			}
+		}
+	}
+	// accounts[] (mixed/http)
+	for _, key := range []string{"accounts", "peers"} {
+		if arr, ok := settings[key].([]any); ok {
+			maxId := 0
+			for _, raw := range arr {
+				if c, ok := raw.(map[string]any); ok {
+					if id, exists := c["clientId"]; exists {
+						if f, ok := id.(float64); ok && int(f) > maxId {
+							maxId = int(f)
+						}
+					}
+				}
+			}
+			for _, raw := range arr {
+				if c, ok := raw.(map[string]any); ok {
+					if _, exists := c["clientId"]; !exists || c["clientId"] == nil || c["clientId"] == 0 {
+						maxId++
+						c["clientId"] = maxId
+						changed = true
+					}
+				}
+			}
+		}
+	}
+	if changed {
+		newSettings, _ := json.Marshal(settings)
+		inbound.Settings = string(newSettings)
+	}
+	return nil
+}
+
+// GetEmailForClientId returns the human-readable identifier for a client entry.
+func (s *InboundService) GetEmailForClientId(inbound *model.Inbound, clientId int) string {
+	// Try settings.clients
+	clients, _ := s.GetClients(inbound)
+	for _, c := range clients {
+		if c.ClientID == clientId {
+			if c.Email != "" {
+				return c.Email
+			}
+			if c.Auth != "" {
+				return "auth:" + c.Auth
+			}
+			return fmt.Sprintf("id:%d", clientId)
+		}
+	}
+	// Try settings.accounts / settings.peers
+	var rawSettings map[string]any
+	if err := json.Unmarshal([]byte(inbound.Settings), &rawSettings); err != nil {
+		return fmt.Sprintf("id:%d", clientId)
+	}
+	for _, key := range []string{"accounts", "peers"} {
+		if arr, ok := rawSettings[key].([]any); ok {
+			for _, raw := range arr {
+				if c, ok := raw.(map[string]any); ok {
+					id, _ := c["clientId"].(float64)
+					if int(id) == clientId {
+						if u, ok := c["user"].(string); ok {
+							return "user:" + u
+						}
+						if pk, ok := c["publicKey"].(string); ok {
+							return "key:" + pk
+						}
+						return fmt.Sprintf("id:%d", clientId)
+					}
+				}
+			}
+		}
+	}
+	return fmt.Sprintf("id:%d", clientId)
 }
 
 func (s *InboundService) getAllEmails() ([]string, error) {
@@ -186,33 +325,41 @@ func (s *InboundService) getAllEmails() ([]string, error) {
 // non-empty subIds is locked (mapped to "") so neither identity can claim it.
 func (s *InboundService) getAllEmailSubIDs() (map[string]string, error) {
 	db := database.GetDB()
-	var rows []struct {
-		Email string
-		SubID string
-	}
-	err := db.Raw(`
-		SELECT JSON_EXTRACT(client.value, '$.email')  AS email,
-		       JSON_EXTRACT(client.value, '$.subId')  AS sub_id
-		FROM inbounds,
-			JSON_EACH(JSON_EXTRACT(inbounds.settings, '$.clients')) AS client
-		`).Scan(&rows).Error
-	if err != nil {
+	// SQLite's JSON_EACH(NULL) throws "malformed JSON", so we cannot process
+	// inbounds whose settings lack the 'clients' key (wireguard/mixed/http).
+	// Instead of fighting the query, fetch all inbounds and iterate in Go.
+	result := make(map[string]string)
+	var allInbounds []model.Inbound
+	if err := db.Model(&model.Inbound{}).Find(&allInbounds).Error; err != nil {
 		return nil, err
 	}
-	result := make(map[string]string, len(rows))
-	for _, r := range rows {
-		email := strings.ToLower(strings.Trim(r.Email, "\""))
-		if email == "" {
+	for _, ib := range allInbounds {
+		var s map[string]any
+		if err := json.Unmarshal([]byte(ib.Settings), &s); err != nil {
 			continue
 		}
-		subID := strings.Trim(r.SubID, "\"")
-		if existing, ok := result[email]; ok {
-			if existing != subID {
-				result[email] = ""
+		clients, ok := s["clients"].([]any)
+		if !ok {
+			continue
+		}
+		for _, raw := range clients {
+			c, ok := raw.(map[string]any)
+			if !ok {
+				continue
 			}
-			continue
+			email, _ := c["email"].(string)
+			subID, _ := c["subId"].(string)
+			if email == "" {
+				continue
+			}
+			email = strings.ToLower(email)
+			existing, exists := result[email]
+			if exists && existing != subID {
+				result[email] = ""
+			} else if !exists {
+				result[email] = subID
+			}
 		}
-		result[email] = subID
 	}
 	return result, nil
 }
@@ -308,7 +455,7 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 		return inbound, false, err
 	}
 	if exist {
-		return inbound, false, common.NewError("Port already exists:", inbound.Port)
+		return inbound, false, s.portConflictErr(inbound.Port, inbound.Id)
 	}
 
 	inbound.Tag, err = s.resolveInboundTag(inbound, 0)
@@ -333,15 +480,16 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 		var settings map[string]any
 		if err2 := json.Unmarshal([]byte(inbound.Settings), &settings); err2 == nil && settings != nil {
 			now := time.Now().Unix() * 1000
-			updatedClients := make([]model.Client, 0, len(clients))
-			for _, c := range clients {
-				if c.CreatedAt == 0 {
-					c.CreatedAt = now
+			if rawClients, ok := settings["clients"].([]any); ok {
+				for _, rc := range rawClients {
+					if c, ok := rc.(map[string]any); ok {
+						if createdAt, ok := c["created_at"]; !ok || createdAt == nil || createdAt == float64(0) {
+							c["created_at"] = now
+						}
+						c["updated_at"] = now
+					}
 				}
-				c.UpdatedAt = now
-				updatedClients = append(updatedClients, c)
 			}
-			settings["clients"] = updatedClients
 			if bs, err3 := json.MarshalIndent(settings, "", "  "); err3 == nil {
 				inbound.Settings = string(bs)
 			} else {
@@ -374,6 +522,9 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 		}
 	}
 
+	// Ensure all clients have clientId before saving
+	s.ensureClientIdsInSettings(inbound)
+
 	db := database.GetDB()
 	tx := db.Begin()
 	defer func() {
@@ -386,6 +537,13 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 
 	err = tx.Save(inbound).Error
 	if err == nil {
+		// Defensively re-write enable: WAL write-back from a previous
+		// transaction or a stale WAL frame can revert the enable field
+		// after Save.  Issuing a targeted UPDATE ensures the intended
+		// value is committed regardless of WAL state.
+		if err2 := tx.Model(&model.Inbound{}).Where("id = ?", inbound.Id).Update("enable", inbound.Enable).Error; err2 != nil {
+			logger.Warningf("AddInbound: defensive enable update failed for id=%d: %v", inbound.Id, err2)
+		}
 		if len(inbound.ClientStats) == 0 {
 			for _, client := range clients {
 				s.AddClientStat(tx, inbound.Id, &client)
@@ -505,6 +663,19 @@ func (s *InboundService) SetInboundEnable(id int, enable bool) (bool, error) {
 		return false, nil
 	}
 
+	// When enabling, check for port conflict with other enabled inbounds
+	if enable {
+		inbound.Enable = true // temporarily reflect target state
+		conflict, err := s.checkPortConflict(inbound, id)
+		inbound.Enable = false // restore
+		if err != nil {
+			return false, err
+		}
+		if conflict {
+			return false, s.portConflictErr(inbound.Port, id)
+		}
+	}
+
 	db := database.GetDB()
 	if err := db.Model(model.Inbound{}).Where("id = ?", id).
 		Update("enable", enable).Error; err != nil {
@@ -564,7 +735,7 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 		return inbound, false, err
 	}
 	if exist {
-		return inbound, false, common.NewError("Port already exists:", inbound.Port)
+		return inbound, false, s.portConflictErr(inbound.Port, inbound.Id)
 	}
 
 	oldInbound, err := s.GetInbound(inbound.Id)
@@ -658,8 +829,13 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 	oldInbound.Port = inbound.Port
 	oldInbound.Protocol = inbound.Protocol
 	oldInbound.Settings = inbound.Settings
+	// Ensure all clients have clientId before saving
+	s.ensureClientIdsInSettings(oldInbound)
 	oldInbound.StreamSettings = inbound.StreamSettings
 	oldInbound.Sniffing = inbound.Sniffing
+	oldInbound.ExternalAddr = inbound.ExternalAddr
+	oldInbound.ExternalAddrTls = inbound.ExternalAddrTls
+	oldInbound.ExternalPort = inbound.ExternalPort
 	oldInbound.Tag, err = s.resolveInboundTag(inbound, inbound.Id)
 	if err != nil {
 		return inbound, false, err
@@ -705,7 +881,13 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 		}
 	}
 
-	return inbound, needRestart, tx.Save(oldInbound).Error
+	err = tx.Save(oldInbound).Error
+	if err == nil {
+		if err2 := tx.Model(&model.Inbound{}).Where("id = ?", oldInbound.Id).Update("enable", oldInbound.Enable).Error; err2 != nil {
+			logger.Warningf("UpdateInbound: defensive enable update failed for id=%d: %v", oldInbound.Id, err2)
+		}
+	}
+	return inbound, needRestart, err
 }
 
 func (s *InboundService) buildRuntimeInboundForAPI(tx *gorm.DB, inbound *model.Inbound) (*model.Inbound, error) {
@@ -839,19 +1021,34 @@ func (s *InboundService) updateClientTraffics(tx *gorm.DB, oldInbound *model.Inb
 	return nil
 }
 
-func (s *InboundService) AddInboundClient(data *model.Inbound) (bool, error) {
+func (s *InboundService) AddInboundClient(data *model.Inbound) (ret bool, rerr error) {
+	// Guard against panics from type assertions — return a proper error
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Errorf("AddInboundClient panic recovered: %v", r)
+			rerr = fmt.Errorf("panic in AddInboundClient: %v", r)
+		}
+	}()
+
+	logger.Infof("AddInboundClient id=%d settings_len=%d", data.Id, len(data.Settings))
 	clients, err := s.GetClients(data)
 	if err != nil {
-		return false, err
+		logger.Errorf("AddInboundClient GetClients: %v", err)
+		return false, fmt.Errorf("GetClients: %w", err)
 	}
 
 	var settings map[string]any
 	err = json.Unmarshal([]byte(data.Settings), &settings)
 	if err != nil {
-		return false, err
+		logger.Errorf("AddInboundClient json.Unmarshal data.Settings: %v settings=%q", err, data.Settings)
+		return false, fmt.Errorf("Unmarshal data.Settings: %w", err)
 	}
 
-	interfaceClients := settings["clients"].([]any)
+	interfaceClients, ok := settings["clients"].([]any)
+	if !ok {
+		logger.Errorf("AddInboundClient settings.clients not array, type=%T", settings["clients"])
+		return false, common.NewError("settings.clients is not an array")
+	}
 	// Add timestamps for new clients being appended
 	nowTs := time.Now().Unix() * 1000
 	for i := range interfaceClients {
@@ -865,6 +1062,7 @@ func (s *InboundService) AddInboundClient(data *model.Inbound) (bool, error) {
 	}
 	existEmail, err := s.checkEmailsExistForClients(clients)
 	if err != nil {
+		logger.Errorf("AddInboundClient checkEmailsExist: %v", err)
 		return false, err
 	}
 	if existEmail != "" {
@@ -904,10 +1102,14 @@ func (s *InboundService) AddInboundClient(data *model.Inbound) (bool, error) {
 	var oldSettings map[string]any
 	err = json.Unmarshal([]byte(oldInbound.Settings), &oldSettings)
 	if err != nil {
-		return false, err
+		logger.Errorf("AddInboundClient Unmarshal oldInbound.Settings: %v settings=%q", err, oldInbound.Settings)
+		return false, fmt.Errorf("oldSettings: %w", err)
 	}
 
-	oldClients := oldSettings["clients"].([]any)
+	oldClients, ok := oldSettings["clients"].([]any)
+	if !ok {
+		return false, common.NewError("old settings.clients is not an array")
+	}
 	oldClients = append(oldClients, interfaceClients...)
 
 	oldSettings["clients"] = oldClients
@@ -918,6 +1120,9 @@ func (s *InboundService) AddInboundClient(data *model.Inbound) (bool, error) {
 	}
 
 	oldInbound.Settings = string(newSettings)
+
+	// Ensure all clients including the new one have clientId before saving
+	s.ensureClientIdsInSettings(oldInbound)
 
 	db := database.GetDB()
 	tx := db.Begin()
@@ -950,7 +1155,9 @@ func (s *InboundService) AddInboundClient(data *model.Inbound) (bool, error) {
 			}
 			cipher := ""
 			if oldInbound.Protocol == "shadowsocks" {
-				cipher = oldSettings["method"].(string)
+				if m, ok := oldSettings["method"].(string); ok {
+					cipher = m
+				}
 			}
 			err1 := rt.AddUser(context.Background(), oldInbound, map[string]any{
 				"email":    client.Email,
@@ -1417,8 +1624,11 @@ func (s *InboundService) UpdateInboundClient(data *model.Inbound, clientId strin
 	if err != nil {
 		return false, err
 	}
-
 	oldInbound.Settings = string(newSettings)
+
+	// Ensure all clients have clientId before saving
+	s.ensureClientIdsInSettings(oldInbound)
+
 	db := database.GetDB()
 	tx := db.Begin()
 
@@ -1569,15 +1779,29 @@ func (s *InboundService) setRemoteTrafficLocked(nodeID int, snap *runtime.Traffi
 	db := database.GetDB()
 	now := time.Now().UnixMilli()
 
-	var central []model.Inbound
-	if err := db.Model(model.Inbound{}).
-		Where("node_id = ?", nodeID).
-		Find(&central).Error; err != nil {
+	// Load ALL inbounds.  (tag, node_id) is now a composite unique index so
+	// inbounds from different nodes (or local) can share the same tag.
+	var allInbounds []model.Inbound
+	if err := db.Model(model.Inbound{}).Find(&allInbounds).Error; err != nil {
 		return false, err
 	}
-	tagToCentral := make(map[string]*model.Inbound, len(central))
-	for i := range central {
-		tagToCentral[central[i].Tag] = &central[i]
+
+	// Key the map by (tag, nodeID) — nodeID=0 for local inbounds.
+	type centralKey struct {
+		tag    string
+		nodeID int
+	}
+	centralKeys := make(map[centralKey]*model.Inbound, len(allInbounds))
+	var central []model.Inbound // inbounds already assigned to this node
+	for i := range allInbounds {
+		nid := 0
+		if allInbounds[i].NodeID != nil {
+			nid = *allInbounds[i].NodeID
+		}
+		centralKeys[centralKey{allInbounds[i].Tag, nid}] = &allInbounds[i]
+		if nid == nodeID {
+			central = append(central, allInbounds[i])
+		}
 	}
 
 	var centralClientStats []xray.ClientTraffic
@@ -1630,7 +1854,8 @@ func (s *InboundService) setRemoteTrafficLocked(nodeID int, snap *runtime.Traffi
 		}
 		snapTags[snapIb.Tag] = struct{}{}
 
-		c, ok := tagToCentral[snapIb.Tag]
+		ck := centralKey{snapIb.Tag, nodeID}
+		c, ok := centralKeys[ck]
 		if !ok {
 			newIb := model.Inbound{
 				UserId:         defaultUserId,
@@ -1655,7 +1880,7 @@ func (s *InboundService) setRemoteTrafficLocked(nodeID int, snap *runtime.Traffi
 				logger.Warning("setRemoteTraffic: create central inbound for tag", snapIb.Tag, "failed:", err)
 				continue
 			}
-			tagToCentral[snapIb.Tag] = &newIb
+			centralKeys[ck] = &newIb
 			structuralChange = true
 			continue
 		}
@@ -1712,7 +1937,7 @@ func (s *InboundService) setRemoteTrafficLocked(nodeID int, snap *runtime.Traffi
 			Delete(&model.Inbound{}).Error; err != nil {
 			return false, err
 		}
-		delete(tagToCentral, c.Tag)
+		delete(centralKeys, centralKey{c.Tag, nodeID})
 		structuralChange = true
 	}
 
@@ -1720,7 +1945,7 @@ func (s *InboundService) setRemoteTrafficLocked(nodeID int, snap *runtime.Traffi
 		if snapIb == nil {
 			continue
 		}
-		c, ok := tagToCentral[snapIb.Tag]
+		c, ok := centralKeys[centralKey{snapIb.Tag, nodeID}]
 		if !ok {
 			continue
 		}

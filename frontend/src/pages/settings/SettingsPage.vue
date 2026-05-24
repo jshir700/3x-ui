@@ -121,31 +121,22 @@ function restartPanel() {
 const confAlerts = computed(() => {
   const out = [];
   if (window.location.protocol !== 'https:') {
-    out.push('Panel is served over plain HTTP — set up TLS for production.');
+    out.push(t('pages.settings.security.httpWarning'));
   }
   if (allSetting.webPort === 2053) {
-    out.push('Default port 2053 is well-known — change it to a random port.');
+    out.push(t('pages.settings.security.portWarning'));
   }
   const segs = window.location.pathname.split('/').length < 4;
   if (segs && allSetting.webBasePath === '/') {
-    out.push('Default base path "/" is well-known — change it to a random path.');
+    out.push(t('pages.settings.security.basePathWarning'));
   }
-  if (allSetting.subEnable) {
+  if (allSetting.subEnable && !allSetting.subUriAddress) {
     let subPath = allSetting.subPath;
     if (allSetting.subURI) {
       try { subPath = new URL(allSetting.subURI).pathname; } catch (_e) { }
     }
     if (subPath === '/sub/') {
-      out.push('Default subscription path "/sub/" is well-known — change it.');
-    }
-  }
-  if (allSetting.subJsonEnable) {
-    let p = allSetting.subJsonPath;
-    if (allSetting.subJsonURI) {
-      try { p = new URL(allSetting.subJsonURI).pathname; } catch (_e) { }
-    }
-    if (p === '/json/') {
-      out.push('Default JSON subscription path "/json/" is well-known — change it.');
+      out.push(t('pages.settings.security.subPathWarning'));
     }
   }
   return out;
@@ -196,9 +187,9 @@ onBeforeUnmount(() => {
             <template v-else>
               <a-alert v-if="confAlerts.length > 0 && alertVisible" type="error" show-icon closable class="conf-alert"
                 @close="alertVisible = false">
-                <template #message>Security warnings</template>
+                <template #message>{{ t('pages.settings.security.title') }}</template>
                 <template #description>
-                  <b>Your panel may be exposed:</b>
+                  <b>{{ t('pages.settings.security.subtitle') }}:</b>
                   <ul>
                     <li v-for="(msg, i) in confAlerts" :key="i">{{ msg }}</li>
                   </ul>
@@ -265,7 +256,7 @@ onBeforeUnmount(() => {
                       </template>
                       <SubscriptionGeneralTab :all-setting="allSetting" />
                     </a-tab-pane>
-                    <a-tab-pane v-if="allSetting.subJsonEnable || allSetting.subClashEnable" key="5" class="tab-pane">
+                    <a-tab-pane key="5" class="tab-pane">
                       <template #tab>
                         <a-tooltip :title="isMobile ? `${t('pages.settings.subSettings')} (Formats)` : null">
                           <CodeOutlined />

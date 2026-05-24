@@ -9,16 +9,30 @@ const props = defineProps({
   allSetting: { type: Object, required: true },
 });
 
-// Sub path is constrained: no `:` or `*`, must start and end with `/`,
-// and no double slashes. Strip on input, normalize on blur — same
-// behavior as the legacy template.
+const subLinkHint = computed(() => {
+  const host = window.location.hostname;
+  const port = props.allSetting.subPort || '2096';
+  const path = props.allSetting.subPath || '/sub/';
+  const customAddr = props.allSetting.subUriAddress;
+  if (customAddr) {
+    const scheme = props.allSetting.subUriScheme || 'https';
+    const cPort = props.allSetting.subUriPort;
+    const cPath = props.allSetting.subUriPath || '/';
+    const hostPart = cPort ? `${customAddr}:${cPort}` : customAddr;
+    const finalPath = cPath.endsWith('/') ? cPath : cPath + '/';
+    return t('subLinkHint', { scheme, hostPart, finalPath }) || `${scheme}://${hostPart}${finalPath}{subId}`;
+  }
+  const hostPart = port ? `${host}:${port}` : host;
+  return t('subLinkHint2', { protocol: window.location.protocol, hostPart, path }) || `${window.location.protocol}//${hostPart}${path}{subId}`;
+});
+
+// Sub path
 const subPath = computed({
   get: () => props.allSetting.subPath,
   set: (v) => {
     props.allSetting.subPath = String(v ?? '').replace(/[:*]/g, '');
   },
 });
-
 function normalizeSubPath() {
   let p = props.allSetting.subPath || '/';
   if (!p.startsWith('/')) p = '/' + p;
@@ -26,6 +40,28 @@ function normalizeSubPath() {
   p = p.replace(/\/+/g, '/');
   props.allSetting.subPath = p;
 }
+
+// Sub URI segments
+const subUriScheme = computed({
+  get: () => props.allSetting.subUriScheme || 'https',
+  set: (v) => { props.allSetting.subUriScheme = v; },
+});
+const subUriAddress = computed({
+  get: () => props.allSetting.subUriAddress || '',
+  set: (v) => { props.allSetting.subUriAddress = v; },
+});
+const subUriPort = computed({
+  get: () => props.allSetting.subUriPort || null,
+  set: (v) => { props.allSetting.subUriPort = v || null; },
+});
+const subUriPath = computed({
+  get: () => props.allSetting.subUriPath || '/',
+  set: (v) => {
+    let p = String(v ?? '/');
+    if (!p.startsWith('/')) p = '/' + p;
+    props.allSetting.subUriPath = p;
+  },
+});
 </script>
 
 <template>
@@ -36,21 +72,9 @@ function normalizeSubPath() {
         <template #description>{{ t('pages.settings.subEnableDesc') }}</template>
         <template #control>
           <a-switch v-model:checked="allSetting.subEnable" />
-        </template>
-      </SettingListItem>
-
-      <SettingListItem paddings="small">
-        <template #title>JSON subscription</template>
-        <template #description>{{ t('pages.settings.subJsonEnable') }}</template>
-        <template #control>
-          <a-switch v-model:checked="allSetting.subJsonEnable" />
-        </template>
-      </SettingListItem>
-
-      <SettingListItem paddings="small">
-        <template #title>Clash / Mihomo subscription</template>
-        <template #control>
-          <a-switch v-model:checked="allSetting.subClashEnable" />
+          <div v-if="allSetting.subEnable" class="sub-control-hint">
+            {{ subLinkHint }}
+          </div>
         </template>
       </SettingListItem>
 
@@ -90,7 +114,26 @@ function normalizeSubPath() {
         <template #title>{{ t('pages.settings.subURI') }}</template>
         <template #description>{{ t('pages.settings.subURIDesc') }}</template>
         <template #control>
-          <a-input v-model:value="allSetting.subURI" type="text" placeholder="(http|https)://domain[:port]/path/" />
+          <a-space direction="vertical" style="width:100%">
+            <a-row :gutter="8">
+              <a-col :span="3">
+                <a-select v-model:value="subUriScheme" style="width:100%">
+                  <a-select-option value="https">https</a-select-option>
+                  <a-select-option value="http">http</a-select-option>
+                </a-select>
+              </a-col>
+              <a-col :span="11">
+                <a-input v-model:value="subUriAddress" :placeholder="t('pages.settings.subUriAddressPlaceholder')"
+                  @blur="v => { subUriAddress.value = (subUriAddress.value || '').replace(/^https?:\/\//, '').trim(); }" />
+              </a-col>
+              <a-col :span="3">
+                <a-input-number v-model:value="subUriPort" :min="1" :max="65535" style="width:100%" :placeholder="t('subPortLabel')" />
+              </a-col>
+              <a-col :span="7">
+                <a-input v-model:value="subUriPath" placeholder="/" />
+              </a-col>
+            </a-row>
+          </a-space>
         </template>
       </SettingListItem>
     </a-collapse-panel>
@@ -202,3 +245,12 @@ function normalizeSubPath() {
     </a-collapse-panel>
   </a-collapse>
 </template>
+
+<style scoped>
+.sub-control-hint {
+  font-size: 12px;
+  color: #999;
+  margin-top: 6px;
+  line-height: 1.5;
+}
+</style>

@@ -70,7 +70,7 @@ var defaultValueMap = map[string]string{
 	"subUpdates":                  "12",
 	"subEncrypt":                  "true",
 	"subShowInfo":                 "true",
-	"subEmailInRemark":            "true",
+	"subEmailInRemark":            "false",
 	"subURI":                      "",
 	"subJsonPath":                 "/json/",
 	"subJsonURI":                  "",
@@ -88,6 +88,10 @@ var defaultValueMap = map[string]string{
 	"externalTrafficInformURI":    "",
 	"restartXrayOnClientDisable":  "true",
 	"xrayOutboundTestUrl":         "https://www.google.com/generate_204",
+
+	// Xray auto-update defaults
+	"xrayAutoUpdate": "true",
+	"xrayUpdateCron":  "0 30 2 * * *",
 
 	// LDAP defaults
 	"ldapEnable":            "false",
@@ -397,6 +401,22 @@ func (s *SettingService) GetTgCpu() (int, error) {
 
 func (s *SettingService) GetTgLang() (string, error) {
 	return s.getString("tgLang")
+}
+
+func (s *SettingService) GetXrayAutoUpdate() (bool, error) {
+	return s.getBool("xrayAutoUpdate")
+}
+
+func (s *SettingService) SetXrayAutoUpdate(value bool) error {
+	return s.setBool("xrayAutoUpdate", value)
+}
+
+func (s *SettingService) GetXrayUpdateCron() (string, error) {
+	return s.getString("xrayUpdateCron")
+}
+
+func (s *SettingService) SetXrayUpdateCron(value string) error {
+	return s.setString("xrayUpdateCron", value)
 }
 
 func (s *SettingService) GetTwoFactorEnable() (bool, error) {
@@ -896,9 +916,10 @@ func (s *SettingService) GetDefaultSettings(host string) (any, error) {
 		"subURI":         func() (any, error) { return s.GetSubURI() },
 		"subJsonURI":     func() (any, error) { return s.GetSubJsonURI() },
 		"subClashURI":    func() (any, error) { return s.GetSubClashURI() },
-		"remarkModel":    func() (any, error) { return s.GetRemarkModel() },
-		"datepicker":     func() (any, error) { return s.GetDatepicker() },
-		"ipLimitEnable":  func() (any, error) { return s.GetIpLimitEnable() },
+		"remarkModel":       func() (any, error) { return s.GetRemarkModel() },
+		"datepicker":        func() (any, error) { return s.GetDatepicker() },
+		"ipLimitEnable":     func() (any, error) { return s.GetIpLimitEnable() },
+		"subEmailInRemark":  func() (any, error) { return s.GetSubEmailInRemark() },
 	}
 
 	result := make(map[string]any)

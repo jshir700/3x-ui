@@ -25,6 +25,7 @@ import NordModal from './NordModal.vue';
 import JsonEditor from '@/components/JsonEditor.vue';
 import { useXraySetting } from './useXraySetting.js';
 import { useWebSocket } from '@/composables/useWebSocket.js';
+import { useAllSetting } from '@/pages/settings/useAllSetting.js';
 
 const { t } = useI18n();
 
@@ -51,6 +52,10 @@ const {
   restartXray,
   applyOutboundsEvent,
 } = useXraySetting();
+
+const {
+  allSetting,
+} = useAllSetting();
 
 useWebSocket({ outbounds: applyOutboundsEvent });
 
@@ -311,7 +316,7 @@ onBeforeUnmount(() => {
                         <span v-if="!isMobile">{{ t('pages.xray.basicTemplate') }}</span>
                       </template>
                       <BasicsTab :template-settings="templateSettings" :outbound-test-url="outboundTestUrl"
-                        :warp-exist="warpExist" :nord-exist="nordExist"
+                        :warp-exist="warpExist" :nord-exist="nordExist" :all-setting="allSetting"
                         @update:outbound-test-url="(v) => (outboundTestUrl = v)" @show-warp="showWarp"
                         @show-nord="showNord" @reset-default="resetToDefault" />
                     </a-tab-pane>

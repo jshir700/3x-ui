@@ -1,10 +1,12 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -267,6 +269,106 @@ type ProbeResultUI struct {
 	MemPct      float64 `json:"memPct"`
 	UptimeSecs  uint64  `json:"uptimeSecs"`
 	Error       string  `json:"error"`
+}
+
+func buildNodeBaseURL(n *model.Node) *url.URL {
+	scheme := n.Scheme
+	if scheme != "http" && scheme != "https" {
+		scheme = "https"
+	}
+	addr, _ := netsafe.NormalizeHost(n.Address)
+	return &url.URL{
+		Scheme: scheme,
+		Host:   net.JoinHostPort(addr, strconv.Itoa(n.Port)),
+	}
+}
+
+func (s *NodeService) buildNodeRequest(ctx context.Context, n *model.Node, method, path string, body io.Reader) (*http.Request, error) {
+	baseURL := buildNodeBaseURL(n)
+	reqURL := baseURL.JoinPath(normalizeBasePath(n.BasePath) + path)
+	req, err := http.NewRequestWithContext(
+		netsafe.ContextWithAllowPrivate(ctx, n.AllowPrivateAddress),
+		method, reqURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+	if n.ApiToken != "" {
+		req.Header.Set("Authorization", "Bearer "+n.ApiToken)
+	}
+	req.Header.Set("Accept", "application/json")
+	return req, nil
+}
+
+// FetchRemoteSettings fetches the full settings from a remote node's panel.
+func (s *NodeService) FetchRemoteSettings(nodeID int) (map[string]any, error) {
+	n, err := s.GetById(nodeID)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := s.buildNodeRequest(ctx, n, http.MethodPost, "panel/setting/all", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := nodeHTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("remote panel returned HTTP %d", resp.StatusCode)
+	}
+	var envelope struct {
+		Success bool           `json:"success"`
+		Msg     string         `json:"msg"`
+		Obj     map[string]any `json:"obj"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		return nil, err
+	}
+	if !envelope.Success {
+		return nil, fmt.Errorf("remote panel returned error: %s", envelope.Msg)
+	}
+	return envelope.Obj, nil
+}
+
+// PushRemoteSettings pushes settings to a remote node's panel.
+func (s *NodeService) PushRemoteSettings(nodeID int, settings map[string]any) error {
+	n, err := s.GetById(nodeID)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(settings)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := s.buildNodeRequest(ctx, n, http.MethodPost, "panel/setting/update", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := nodeHTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("remote panel returned HTTP %d", resp.StatusCode)
+	}
+	var envelope struct {
+		Success bool   `json:"success"`
+		Msg     string `json:"msg"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		return err
+	}
+	if !envelope.Success {
+		return fmt.Errorf("remote panel returned error: %s", envelope.Msg)
+	}
+	return nil
 }
 
 func (p HeartbeatPatch) ToUI(ok bool) ProbeResultUI {

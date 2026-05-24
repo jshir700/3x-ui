@@ -7,6 +7,70 @@ import SettingListItem from '@/components/SettingListItem.vue';
 
 const { t } = useI18n();
 
+function getTimezones() {
+  try {
+    return Intl.supportedValuesOf('timeZone');
+  } catch {
+    return ['UTC', 'Asia/Shanghai', 'Asia/Tokyo', 'Asia/Seoul', 'Asia/Singapore',
+      'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+      'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Moscow'];
+  }
+}
+
+function getTzOffsetMinutes(tz) {
+  try {
+    const now = Date.now();
+    const utcDate = new Date(new Intl.DateTimeFormat('en-US', {
+      timeZone: 'UTC', year: 'numeric', month: 'numeric', day: 'numeric',
+      hour: 'numeric', minute: 'numeric', second: 'numeric',
+    }).format(now));
+    const tzDate = new Date(new Intl.DateTimeFormat('en-US', {
+      timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric',
+      hour: 'numeric', minute: 'numeric', second: 'numeric',
+    }).format(now));
+    return (tzDate - utcDate) / 60000;
+  } catch {
+    return 0;
+  }
+}
+
+function formatTzOffset(minutes) {
+  const sign = minutes >= 0 ? '+' : '-';
+  const totalHours = Math.abs(minutes) / 60;
+  if (totalHours % 1 === 0) return `UTC${sign}${Math.floor(totalHours)}`;
+  return `UTC${sign}${totalHours.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}`;
+}
+
+function getMachineTimezone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone;
+  } catch {
+    return 'Asia/Shanghai';
+  }
+}
+
+const timezoneOptions = ref([]);
+
+onMounted(() => {
+  const zones = getTimezones();
+  const mapped = zones.map(z => {
+    const offsetMin = getTzOffsetMinutes(z);
+    return {
+      label: `${z.replace(/_/g, ' ')} (${formatTzOffset(offsetMin)})`,
+      value: z,
+      offsetMin,
+    };
+  });
+  mapped.sort((a, b) => a.offsetMin - b.offsetMin || a.value.localeCompare(b.value));
+  timezoneOptions.value = mapped;
+
+  // If timeLocation is "Local" (Go's default), replace with browser's actual timezone
+  if (props.allSetting?.timeLocation === 'Local') {
+    const machineTz = getMachineTimezone();
+    if (machineTz) props.allSetting.timeLocation = machineTz;
+  }
+});
+
 const props = defineProps({
   // Reactive AllSetting instance shared with the parent page.
   allSetting: { type: Object, required: true },
@@ -51,10 +115,10 @@ const datepicker = computed({
   set: (value) => { props.allSetting.datepicker = value; },
 });
 
-const datepickerList = [
-  { name: 'Gregorian (Standard)', value: 'gregorian' },
-  { name: 'Jalalian (شمسی)', value: 'jalalian' },
-];
+const datepickerList = computed(() => [
+  { name: t('pages.settings.gregorian') || 'Gregorian (Standard)', value: 'gregorian' },
+  { name: t('pages.settings.jalalian') || 'Jalalian (شمسی)', value: 'jalalian' },
+]);
 
 // Language is stored client-side in a cookie, NOT in AllSetting. The
 // legacy panel reloads on change so the Go side renders templates in
@@ -251,7 +315,13 @@ onMounted(loadInboundTags);
         <template #title>{{ t('pages.settings.timeZone') }}</template>
         <template #description>{{ t('pages.settings.timeZoneDesc') }}</template>
         <template #control>
-          <a-input v-model:value="allSetting.timeLocation" type="text" />
+          <a-select v-model:value="allSetting.timeLocation" show-search
+            :filter-option="(input, option) => option.value.toLowerCase().includes(input.toLowerCase())"
+            :style="{ width: '100%' }">
+            <a-select-option v-for="tz in timezoneOptions" :key="tz.value" :value="tz.value">
+              {{ tz.label }}
+            </a-select-option>
+          </a-select>
         </template>
       </SettingListItem>
 

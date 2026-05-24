@@ -35,6 +35,7 @@ func (a *XUIController) initRouter(g *gin.RouterGroup) {
 	g.GET("/inbounds", a.inbounds)
 	g.GET("/nodes", a.nodes)
 	g.GET("/settings", a.settings)
+	g.GET("/subscription", a.subscription)
 	g.GET("/xray", a.xraySettings)
 	g.GET("/api-docs", a.apiDocs)
 
@@ -70,6 +71,11 @@ func (a *XUIController) nodes(c *gin.Context) {
 // settings renders the settings management page.
 func (a *XUIController) settings(c *gin.Context) {
 	serveDistPage(c, "settings.html")
+}
+
+// subscription renders the subscription management page.
+func (a *XUIController) subscription(c *gin.Context) {
+	serveDistPage(c, "subscription.html")
 }
 
 // xraySettings renders the Xray settings page.

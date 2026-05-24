@@ -162,7 +162,7 @@ async function submit() {
       // Clients all serialize via toString() — same shape the single-
       // client modal posts. Joining with `,` lets the Go side parse the
       // outer array directly.
-      settings: `{"clients": [${clients.map((c) => c.toString()).join(',')}]}`,
+      settings: `{"clients": [${clients.map((c) => c.toString(false)).join(',')}]}`,
     };
     const msg = await HttpUtil.post('/panel/api/inbounds/addClient', payload);
     if (msg?.success) {
