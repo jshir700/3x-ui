@@ -203,7 +203,7 @@ func (s *AllSetting) CheckValid() error {
 		s.SubClashPath += "/"
 	}
 
-	for _, cidr := range strings.Split(s.TrustedProxyCIDRs, ",") {
+	for cidr := range strings.SplitSeq(s.TrustedProxyCIDRs, ",") {
 		cidr = strings.TrimSpace(cidr)
 		if cidr == "" {
 			continue

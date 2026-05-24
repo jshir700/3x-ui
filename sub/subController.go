@@ -9,17 +9,23 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/database"
-	"github.com/mhsanaei/3x-ui/v3/database/model"
-	"github.com/mhsanaei/3x-ui/v3/logger"
-	"github.com/mhsanaei/3x-ui/v3/util/common"
 	"github.com/mhsanaei/3x-ui/v3/web/service"
 
 	"github.com/gin-gonic/gin"
-	"github.com/goccy/go-yaml"
 )
+
+// writeSubError translates a service-layer result into an HTTP response.
+// A nil error with no rows means the subId doesn't match anything (deleted
+// client, never-existed id) and becomes 404. A real error becomes 500. No
+// body — VPN clients only look at the status.
+func writeSubError(c *gin.Context, err error) {
+	if err == nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	c.Status(http.StatusInternalServerError)
+}
 
 // SUBController handles HTTP requests for subscription links and JSON configurations.
 type SUBController struct {
@@ -37,11 +43,10 @@ type SUBController struct {
 	subEncrypt       bool
 	updateInterval   string
 
-	subService         *SubService
-	subJsonService     *SubJsonService
-	subClashService    *SubClashService
-	settingService     service.SettingService
-	subscriptionService service.SubscriptionService
+	subService      *SubService
+	subJsonService  *SubJsonService
+	subClashService *SubClashService
+	settingService  service.SettingService
 }
 
 // NewSUBController creates a new subscription controller with the given configuration.
@@ -109,100 +114,10 @@ func (a *SUBController) initRouter(g *gin.RouterGroup) {
 // subs handles HTTP requests for subscription links, returning either HTML page or base64-encoded subscription data.
 func (a *SUBController) subs(c *gin.Context) {
 	subId := c.Param("subid")
-	password := c.Query("pwd")
 	scheme, host, hostWithPort, hostHeader := a.subService.ResolveRequest(c)
-
-	// First check: aggregate subscription (new system)
-	userAgent := c.GetHeader("User-Agent")
-	aggRes, aggErr := a.tryAggregateSub(subId, password, host, userAgent)
-	if aggErr == nil {
-		accept := c.GetHeader("Accept")
-		if strings.Contains(strings.ToLower(accept), "text/html") || c.Query("html") == "1" || strings.EqualFold(c.Query("view"), "html") {
-			// Browser: serve the SPA (SubPage.vue) with language selector
-			basePath, _ := c.Get("base_path")
-			basePathStr, _ := basePath.(string)
-			if basePathStr == "" {
-				basePathStr = "/"
-			}
-			buildSubURL := func(baseURL string) string {
-				if aggRes.Password != "" {
-					sep := "?"
-					if strings.Contains(baseURL, "?") {
-						sep = "&"
-					}
-					return baseURL + sep + "pwd=" + aggRes.Password
-				}
-				return baseURL
-			}
-			subURL := buildSubURL(fmt.Sprintf("%s://%s%s%s", scheme, hostWithPort, a.subPath, subId))
-			subJsonURL := ""
-			subClashURL := ""
-			if a.jsonEnabled {
-				subJsonURL = buildSubURL(fmt.Sprintf("%s://%s%s%s", scheme, hostWithPort, a.subJsonPath, subId))
-			}
-			if a.clashEnabled {
-				subClashURL = buildSubURL(fmt.Sprintf("%s://%s%s%s", scheme, hostWithPort, a.subClashPath, subId))
-			}
-
-			download := common.FormatTraffic(aggRes.TotalDown)
-			upload := common.FormatTraffic(aggRes.TotalUp)
-			totalStr := "∞"
-			usedStr := common.FormatTraffic(aggRes.TotalUp + aggRes.TotalDown)
-			remainedStr := ""
-			if aggRes.TotalLimit > 0 {
-				totalStr = common.FormatTraffic(aggRes.TotalLimit)
-				left := aggRes.TotalLimit - (aggRes.TotalUp + aggRes.TotalDown)
-				if left < 0 {
-					left = 0
-				}
-				remainedStr = common.FormatTraffic(left)
-			}
-
-			page := PageData{
-				Host:           host,
-				BasePath:       basePathStr,
-				SId:            subId,
-				Format:         aggRes.Format,
-				Enabled:        true,
-				Download:       download,
-				Upload:         upload,
-				Total:          totalStr,
-				Used:           usedStr,
-				Remained:       remainedStr,
-				Expire:         aggRes.ExpiryTime / 1000,
-				LastOnline:     aggRes.LastOnline,
-				DownloadByte:   aggRes.TotalDown,
-				UploadByte:     aggRes.TotalUp,
-				TotalByte:      aggRes.TotalLimit,
-				SubUrl:         subURL,
-				SubJsonUrl:     subJsonURL,
-				SubClashUrl:    subClashURL,
-				SubTitle:       aggRes.Title,
-				SubSupportUrl:  aggRes.SupportUrl,
-				SubProfileUrl:  aggRes.ProfileUrl,
-				Announce:       aggRes.Announce,
-				UpdateInterval: aggRes.UpdateInterval,
-				CallCount:      aggRes.CallCount,
-				Result:         []string{aggRes.Content},
-			}
-			a.serveSubPage(c, basePathStr, page)
-			return
-		}
-		// curl / client apps: return content as-is (already formatted)
-		c.String(200, aggRes.Content)
-		return
-	}
-
-	// User-Agent mismatch → return 404 immediately (do not fall back to legacy)
-	if aggErr != nil && strings.Contains(aggErr.Error(), "user-agent") {
-		c.String(404, "404 Not Found")
-		return
-	}
-
-	// Fallback: legacy per-client subscription
 	subs, lastOnline, traffic, err := a.subService.GetSubs(subId, host)
 	if err != nil || len(subs) == 0 {
-		c.String(400, "Error!")
+		writeSubError(c, err)
 	} else {
 		result := ""
 		for _, sub := range subs {
@@ -224,7 +139,7 @@ func (a *SUBController) subs(c *gin.Context) {
 				basePath = "/"
 			}
 			basePathStr := basePath.(string)
-			page := a.subService.BuildPageData(subId, hostHeader, traffic, lastOnline, subs, subURL, subJsonURL, subClashURL, basePathStr, a.subTitle, a.subSupportUrl, a.subProfileUrl, a.subAnnounce, 0, 0, "")
+			page := a.subService.BuildPageData(subId, hostHeader, traffic, lastOnline, subs, subURL, subJsonURL, subClashURL, basePathStr, a.subTitle, a.subSupportUrl)
 			a.serveSubPage(c, basePathStr, page)
 			return
 		}
@@ -273,9 +188,6 @@ func (a *SUBController) serveSubPage(c *gin.Context, basePath string, page PageD
 	}
 
 	// JSON-marshal the view-model so the SPA can read it as a plain
-	// object on mount. PageData fields are already in the shape the Vue
-	// component expects, plus a `links` array carrying the rendered
-	// share URLs.
 	// The panel's "Calendar Type" setting decides whether the SubPage
 	// renders dates in Gregorian or Jalali — surface it here so the SPA
 	// can match the rest of the panel without a round-trip.
@@ -284,31 +196,24 @@ func (a *SUBController) serveSubPage(c *gin.Context, basePath string, page PageD
 		datepicker = "gregorian"
 	}
 
-		subData := map[string]any{
-		"sId":		page.SId,
-		"enabled":		page.Enabled,
-		"format":		page.Format,
-		"download":		page.Download,
-		"upload":		page.Upload,
-		"total":		page.Total,
-		"used":		page.Used,
-		"remained":		page.Remained,
-		"expire":		page.Expire,
-		"lastOnline":		page.LastOnline,
-		"downloadByte":		page.DownloadByte,
-		"uploadByte":		page.UploadByte,
-		"totalByte":		page.TotalByte,
-		"subUrl":		page.SubUrl,
-		"subJsonUrl":		page.SubJsonUrl,
-		"subClashUrl":		page.SubClashUrl,
-		"subTitle":		page.SubTitle,
-		"subSupportUrl":		page.SubSupportUrl,
-		"subProfileUrl":		page.SubProfileUrl,
-		"announce":		page.Announce,
-		"updateInterval":		page.UpdateInterval,
-		"callCount":		page.CallCount,
-		"links":		page.Result,
-		"datepicker":		datepicker,
+	subData := map[string]any{
+		"sId":          page.SId,
+		"enabled":      page.Enabled,
+		"download":     page.Download,
+		"upload":       page.Upload,
+		"total":        page.Total,
+		"used":         page.Used,
+		"remained":     page.Remained,
+		"expire":       page.Expire,
+		"lastOnline":   page.LastOnline,
+		"downloadByte": page.DownloadByte,
+		"uploadByte":   page.UploadByte,
+		"totalByte":    page.TotalByte,
+		"subUrl":       page.SubUrl,
+		"subJsonUrl":   page.SubJsonUrl,
+		"subClashUrl":  page.SubClashUrl,
+		"links":        page.Result,
+		"datepicker":   datepicker,
 	}
 	subDataJSON, err := json.Marshal(subData)
 	if err != nil {
@@ -344,7 +249,7 @@ func (a *SUBController) subJsons(c *gin.Context) {
 	scheme, host, hostWithPort, _ := a.subService.ResolveRequest(c)
 	jsonSub, header, err := a.subJsonService.GetJson(subId, host)
 	if err != nil || len(jsonSub) == 0 {
-		c.String(400, "Error!")
+		writeSubError(c, err)
 	} else {
 		profileUrl := a.subProfileUrl
 		if profileUrl == "" {
@@ -361,7 +266,7 @@ func (a *SUBController) subClashs(c *gin.Context) {
 	scheme, host, hostWithPort, _ := a.subService.ResolveRequest(c)
 	clashSub, header, err := a.subClashService.GetClash(subId, host)
 	if err != nil || len(clashSub) == 0 {
-		c.String(400, "Error!")
+		writeSubError(c, err)
 	} else {
 		profileUrl := a.subProfileUrl
 		if profileUrl == "" {
@@ -406,211 +311,4 @@ func (a *SUBController) ApplyCommonHeaders(
 	if profileRoutingRules != "" {
 		c.Writer.Header().Set("Routing", profileRoutingRules)
 	}
-}
-
-// tryAggregateSubResult holds the formatted result of an aggregate subscription.
-type tryAggregateSubResult struct {
-	Content        string // final output (text, base64, json, or clash)
-	Format         string // the format that was applied
-	InboundCount   int
-	Remark         string
-	SubId          string
-	Password       string
-	Title          string
-	SupportUrl     string
-	ProfileUrl     string
-	Announce       string
-	UpdateInterval int
-	ExpiryTime     int64
-	LastOnline     int64
-	CallCount      int64
-	TotalUp        int64
-	TotalDown      int64
-	TotalLimit     int64
-}
-
-// tryAggregateSub checks the subscriptions table for a matching subId and
-// returns aggregate proxy links. Returns error if not found or password mismatch.
-func (a *SUBController) tryAggregateSub(subId, password, host, userAgent string) (*tryAggregateSubResult, error) {
-	globalEnable, _ := a.settingService.GetSubEnable()
-	if !globalEnable {
-		return nil, fmt.Errorf("subscription service is disabled")
-	}
-
-	sub, err := a.subscriptionService.GetBySubId(subId)
-	if err != nil {
-		return nil, err
-	}
-	if !sub.Enable {
-		return nil, fmt.Errorf("subscription is disabled")
-	}
-	if sub.ExpiryTime > 0 && time.Now().UnixMilli() > sub.ExpiryTime {
-		return nil, fmt.Errorf("subscription has expired")
-	}
-	if sub.Password != "" && sub.Password != password {
-		return nil, fmt.Errorf("invalid password")
-	}
-	if sub.UserAgentEnabled {
-		if sub.UserAgentValues == "" {
-			return nil, fmt.Errorf("user-agent filter: no allowed values configured")
-		}
-		values := strings.Split(sub.UserAgentValues, ",")
-		found := false
-		for _, v := range values {
-			if strings.Contains(strings.ToLower(userAgent), strings.ToLower(strings.TrimSpace(v))) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return nil, fmt.Errorf("user-agent mismatch")
-		}
-	}
-
-	// Resolve inbound IDs
-	var ids []int
-	if sub.AutoIncludeAllEnabled {
-		db := database.GetDB()
-		db.Model(&model.Inbound{}).Where("enable = ?", true).Order("sort_order ASC, id ASC").Pluck("id", &ids)
-	} else {
-		ids = parseSubInboundIds(sub.InboundIds)
-	}
-	if sub.SyncWithInboundOrder {
-		db := database.GetDB()
-		db.Model(&model.Inbound{}).Where("id IN ?", ids).Order("sort_order ASC, id ASC").Pluck("id", &ids)
-	}
-
-	a.subService.PrepareForRequest(host)
-	var allLinks []string
-	var jsonParts []string
-	var clashProxies []map[string]any
-	var totalUp, totalDown, totalLimit int64
-	enabledCount := 0
-	db := database.GetDB()
-	for _, id := range ids {
-		inbound := &model.Inbound{}
-		if err := db.Where("id = ?", id).First(inbound).Error; err != nil {
-			continue
-		}
-		if !inbound.Enable {
-			continue
-		}
-		enabledCount++
-		totalUp += inbound.Up
-		totalDown += inbound.Down
-		totalLimit += inbound.Total
-		clients, err := a.subService.inboundService.GetClients(inbound)
-		if err != nil || clients == nil {
-			continue
-		}
-		for _, client := range clients {
-			if !client.Enable {
-				continue
-			}
-			// Generate link for each client — per-client panic recovery
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						logger.Warningf("tryAggregateSub: panic in link gen for inbound %d email %s: %v", id, client.Email, r)
-					}
-				}()
-				link := a.subService.GetLink(inbound, client.Email)
-				if link != "" {
-					allLinks = append(allLinks, link)
-				}
-				if sub.Format == "json" {
-					j := a.subJsonService.GetJsonForClient(inbound, client, host)
-					if j != "" {
-						jsonParts = append(jsonParts, j)
-					}
-				}
-				if sub.Format == "clash" {
-					proxies := a.subClashService.GetClashForClient(inbound, client, host)
-					clashProxies = append(clashProxies, proxies...)
-				}
-			}()
-		}
-	}
-	if len(allLinks) == 0 {
-		return nil, fmt.Errorf("no active inbounds in subscription")
-	}
-
-	rawContent := strings.Join(allLinks, "\n")
-	var output string
-	switch sub.Format {
-	case "text":
-		output = rawContent
-	case "json":
-		if len(jsonParts) > 0 {
-			output = "[" + strings.Join(jsonParts, ",") + "]"
-		} else {
-			output = "[]"
-		}
-	case "clash":
-		cc := ClashConfig{
-			Proxies: clashProxies,
-			ProxyGroups: []map[string]any{
-				{"name": "PROXY", "type": "select", "proxies": func() []string {
-					var names []string
-					for _, p := range clashProxies {
-						if name, ok := p["name"].(string); ok {
-							names = append(names, name)
-						}
-					}
-					names = append(names, "DIRECT")
-					return names
-				}()},
-			},
-			Rules: []string{"MATCH,PROXY"},
-		}
-		yamlBytes, _ := yaml.Marshal(&cc)
-		output = string(yamlBytes)
-	default: // "base64"
-		output = base64.StdEncoding.EncodeToString([]byte(rawContent))
-	}
-
-	// Update call count and last used timestamp
-	a.subscriptionService.IncrementCallCount(subId)
-	a.subscriptionService.UpdateLastUsedAt(subId)
-
-	return &tryAggregateSubResult{
-		Content:        output,
-		Format:         sub.Format,
-		InboundCount:   enabledCount,
-		Remark:         sub.Remark,
-		SubId:          sub.SubId,
-		Title:          sub.Title,
-		SupportUrl:     sub.SupportUrl,
-		ProfileUrl:     sub.ProfileUrl,
-		Announce:       sub.Announce,
-		UpdateInterval: sub.UpdateInterval,
-		ExpiryTime:     sub.ExpiryTime,
-		LastOnline:     sub.LastUsedAt,
-		CallCount:      sub.CallCount,
-		TotalUp:        totalUp,
-		TotalDown:      totalDown,
-		TotalLimit:     totalLimit,
-	}, nil
-}
-
-func parseSubInboundIds(s string) []int {
-	if s == "" {
-		return nil
-	}
-	parts := strings.Split(s, ",")
-	ids := make([]int, 0, len(parts))
-	seen := make(map[int]bool)
-	for _, p := range parts {
-		// Handle both "inboundId" and "inboundId:clientId" formats
-		trimmed := strings.TrimSpace(p)
-		if colonIdx := strings.IndexByte(trimmed, ':'); colonIdx >= 0 {
-			trimmed = trimmed[:colonIdx]
-		}
-		id, err := strconv.Atoi(trimmed)
-		if err == nil && id > 0 && !seen[id] {
-			ids = append(ids, id)
-			seen[id] = true
-		}
-	}
-	return ids
 }

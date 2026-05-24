@@ -212,7 +212,7 @@ func (a *NodeController) history(c *gin.Context) {
 		return
 	}
 	bucket, err := strconv.Atoi(c.Param("bucket"))
-	if err != nil || bucket <= 0 || !allowedHistoryBuckets[bucket] {
+	if err != nil || bucket <= 0 || !service.IsAllowedHistoryBucket(bucket) {
 		jsonMsg(c, "invalid bucket", fmt.Errorf("unsupported bucket"))
 		return
 	}
