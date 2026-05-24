@@ -283,13 +283,17 @@ func (s *SubService) genVmessLink(inbound *model.Inbound, email string) string {
 		return ""
 	}
 	address := s.resolveInboundAddress(inbound)
+	port := s.resolveInboundPort(inbound)
 	obj := map[string]any{
 		"v":    "2",
 		"add":  address,
-		"port": inbound.Port,
+		"port": port,
 		"type": "none",
 	}
 	stream := unmarshalStreamSettings(inbound.StreamSettings)
+	if s.externalAddrTLS(inbound) {
+		stream["security"] = "tls"
+	}
 	network, _ := stream["network"].(string)
 	applyVmessNetworkParams(stream, network, obj)
 	if finalmask, ok := stream["finalmask"].(map[string]any); ok {
@@ -322,10 +326,13 @@ func (s *SubService) genVlessLink(inbound *model.Inbound, email string) string {
 	}
 	address := s.resolveInboundAddress(inbound)
 	stream := unmarshalStreamSettings(inbound.StreamSettings)
+	if s.externalAddrTLS(inbound) {
+		stream["security"] = "tls"
+	}
 	clients, _ := s.inboundService.GetClients(inbound)
 	clientIndex := findClientIndex(clients, email)
 	uuid := clients[clientIndex].ID
-	port := inbound.Port
+	port := s.resolveInboundPort(inbound)
 	streamNetwork := stream["network"].(string)
 	params := make(map[string]string)
 	params["type"] = streamNetwork
@@ -383,10 +390,13 @@ func (s *SubService) genTrojanLink(inbound *model.Inbound, email string) string 
 	}
 	address := s.resolveInboundAddress(inbound)
 	stream := unmarshalStreamSettings(inbound.StreamSettings)
+	if s.externalAddrTLS(inbound) {
+		stream["security"] = "tls"
+	}
 	clients, _ := s.inboundService.GetClients(inbound)
 	clientIndex := findClientIndex(clients, email)
 	password := clients[clientIndex].Password
-	port := inbound.Port
+	port := s.resolveInboundPort(inbound)
 	streamNetwork := stream["network"].(string)
 	params := make(map[string]string)
 	params["type"] = streamNetwork
@@ -433,7 +443,11 @@ func (s *SubService) genShadowsocksLink(inbound *model.Inbound, email string) st
 		return ""
 	}
 	address := s.resolveInboundAddress(inbound)
+	port := s.resolveInboundPort(inbound)
 	stream := unmarshalStreamSettings(inbound.StreamSettings)
+	if s.externalAddrTLS(inbound) {
+		stream["security"] = "tls"
+	}
 	clients, _ := s.inboundService.GetClients(inbound)
 
 	var settings map[string]any
@@ -478,7 +492,7 @@ func (s *SubService) genShadowsocksLink(inbound *model.Inbound, email string) st
 		)
 	}
 
-	link := fmt.Sprintf("ss://%s@%s:%d", base64.StdEncoding.EncodeToString([]byte(encPart)), address, inbound.Port)
+	link := fmt.Sprintf("ss://%s@%s:%d", base64.StdEncoding.EncodeToString([]byte(encPart)), address, port)
 	return buildLinkWithParams(link, params, s.genRemark(inbound, email, ""))
 }
 
@@ -589,7 +603,7 @@ func (s *SubService) genHysteriaLink(inbound *model.Inbound, email string) strin
 
 	// No external proxy configured — use the inbound's resolved address so
 	// node-managed inbounds get the node's host instead of the central panel's.
-	link := fmt.Sprintf("%s://%s@%s:%d", protocol, auth, s.resolveInboundAddress(inbound), inbound.Port)
+	link := fmt.Sprintf("%s://%s@%s:%d", protocol, auth, s.resolveInboundAddress(inbound), s.resolveInboundPort(inbound))
 	url, _ := url.Parse(link)
 	q := url.Query()
 	for k, v := range params {
@@ -628,6 +642,9 @@ func (s *SubService) loadNodes() {
 //  3. Otherwise fall back to the request's host (whatever the client
 //     subscribed against).
 func (s *SubService) resolveInboundAddress(inbound *model.Inbound) string {
+	if inbound.ExternalAddr != "" {
+		return inbound.ExternalAddr
+	}
 	if inbound.NodeID != nil && s.nodesByID != nil {
 		if n, ok := s.nodesByID[*inbound.NodeID]; ok && n.Address != "" {
 			return n.Address
@@ -637,6 +654,21 @@ func (s *SubService) resolveInboundAddress(inbound *model.Inbound) string {
 		return s.address
 	}
 	return inbound.Listen
+}
+
+// resolveInboundPort returns the port external clients should connect to.
+// If ExternalPort is set it takes priority; otherwise the inbound's own port.
+func (s *SubService) resolveInboundPort(inbound *model.Inbound) int {
+	if inbound.ExternalPort > 0 {
+		return inbound.ExternalPort
+	}
+	return inbound.Port
+}
+
+// externalAddrTLS returns true when TLS should be forced because an
+// explicit external address is configured and the user opted into TLS.
+func (s *SubService) externalAddrTLS(inbound *model.Inbound) bool {
+	return inbound.ExternalAddr != "" && inbound.ExternalAddrTls
 }
 
 func findClientIndex(clients []model.Client, email string) int {

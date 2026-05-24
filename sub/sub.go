@@ -228,7 +228,6 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 		g, LinksPath, JsonPath, ClashPath, subJsonEnable, subClashEnable, Encrypt, ShowInfo, RemarkModel, SubUpdates,
 		SubJsonFragment, SubJsonNoises, SubJsonMux, SubJsonRules, SubTitle, SubSupportUrl,
 		SubProfileUrl, SubAnnounce, SubEnableRouting, SubRoutingRules)
-	s.sub.subscriptionService = service.SubscriptionService{}
 
 	return engine, nil
 }

@@ -126,7 +126,7 @@ func (s *InboundService) enrichClientStats(db *gorm.DB, inbounds []*model.Inboun
 func (s *InboundService) GetInbounds(userId int) ([]*model.Inbound, error) {
 	db := database.GetDB()
 	var inbounds []*model.Inbound
-	err := db.Model(model.Inbound{}).Preload("ClientStats").Where("user_id = ?", userId).Find(&inbounds).Error
+	err := db.Model(model.Inbound{}).Preload("ClientStats").Where("user_id = ?", userId).Order("sort_order ASC, id ASC").Find(&inbounds).Error
 	if err != nil && err != gorm.ErrRecordNotFound {
 		return nil, err
 	}
@@ -148,7 +148,7 @@ func (s *InboundService) GetInbounds(userId int) ([]*model.Inbound, error) {
 func (s *InboundService) GetInboundsSlim(userId int) ([]*model.Inbound, error) {
 	db := database.GetDB()
 	var inbounds []*model.Inbound
-	err := db.Model(model.Inbound{}).Preload("ClientStats").Where("user_id = ?", userId).Find(&inbounds).Error
+	err := db.Model(model.Inbound{}).Preload("ClientStats").Where("user_id = ?", userId).Order("sort_order ASC, id ASC").Find(&inbounds).Error
 	if err != nil && err != gorm.ErrRecordNotFound {
 		return nil, err
 	}
@@ -361,6 +361,26 @@ func (s *InboundService) GetInboundsByTrafficReset(period string) ([]*model.Inbo
 	return inbounds, nil
 }
 
+func (s *InboundService) ReorderInbounds(ids []int) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	db := database.GetDB()
+	tx := db.Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+	for i, id := range ids {
+		if err := tx.Model(&model.Inbound{}).Where("id = ?", id).Update("sort_order", (i+1)*10).Error; err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit().Error
+}
+
 func (s *InboundService) GetClients(inbound *model.Inbound) ([]model.Client, error) {
 	settings := map[string][]model.Client{}
 	json.Unmarshal([]byte(inbound.Settings), &settings)
@@ -372,7 +392,124 @@ func (s *InboundService) GetClients(inbound *model.Inbound) ([]model.Client, err
 	if clients == nil {
 		return nil, nil
 	}
+	// Auto-assign clientId in-memory only — do NOT write back to DB here
+	for i := range clients {
+		if clients[i].ClientID == 0 {
+			clients[i].ClientID = s.allocateClientId(clients)
+		}
+	}
 	return clients, nil
+}
+
+// allocateClientId returns the next free clientId for a slice of clients (1-based, never reuses)
+func (s *InboundService) allocateClientId(clients []model.Client) int {
+	maxId := 0
+	for _, c := range clients {
+		if c.ClientID > maxId {
+			maxId = c.ClientID
+		}
+	}
+	return maxId + 1
+}
+
+// ensureClientIdsInSettings ensures every entry in settings.clients, .accounts and .peers
+// has a ClientID. Called when saving an inbound.
+func (s *InboundService) ensureClientIdsInSettings(inbound *model.Inbound) error {
+	var settings map[string]any
+	if err := json.Unmarshal([]byte(inbound.Settings), &settings); err != nil {
+		return err
+	}
+	changed := false
+	// clients[]
+	if clientsArr, ok := settings["clients"].([]any); ok {
+		maxId := 0
+		for _, raw := range clientsArr {
+			if c, ok := raw.(map[string]any); ok {
+				if id, exists := c["clientId"]; exists {
+					if f, ok := id.(float64); ok && int(f) > maxId {
+						maxId = int(f)
+					}
+				}
+			}
+		}
+		for _, raw := range clientsArr {
+			if c, ok := raw.(map[string]any); ok {
+				if _, exists := c["clientId"]; !exists || c["clientId"] == nil || c["clientId"] == 0 {
+					maxId++
+					c["clientId"] = maxId
+					changed = true
+				}
+			}
+		}
+	}
+	// accounts[] / peers[]
+	for _, key := range []string{"accounts", "peers"} {
+		if arr, ok := settings[key].([]any); ok {
+			maxId := 0
+			for _, raw := range arr {
+				if c, ok := raw.(map[string]any); ok {
+					if id, exists := c["clientId"]; exists {
+						if f, ok := id.(float64); ok && int(f) > maxId {
+							maxId = int(f)
+						}
+					}
+				}
+			}
+			for _, raw := range arr {
+				if c, ok := raw.(map[string]any); ok {
+					if _, exists := c["clientId"]; !exists || c["clientId"] == nil || c["clientId"] == 0 {
+						maxId++
+						c["clientId"] = maxId
+						changed = true
+					}
+				}
+			}
+		}
+	}
+	if changed {
+		newSettings, _ := json.Marshal(settings)
+		inbound.Settings = string(newSettings)
+	}
+	return nil
+}
+
+// GetEmailForClientId returns the human-readable identifier for a client entry.
+func (s *InboundService) GetEmailForClientId(inbound *model.Inbound, clientId int) string {
+	clients, _ := s.GetClients(inbound)
+	for _, c := range clients {
+		if c.ClientID == clientId {
+			if c.Email != "" {
+				return c.Email
+			}
+			if c.Auth != "" {
+				return "auth:" + c.Auth
+			}
+			return fmt.Sprintf("id:%d", clientId)
+		}
+	}
+	var rawSettings map[string]any
+	if err := json.Unmarshal([]byte(inbound.Settings), &rawSettings); err != nil {
+		return fmt.Sprintf("id:%d", clientId)
+	}
+	for _, key := range []string{"accounts", "peers"} {
+		if arr, ok := rawSettings[key].([]any); ok {
+			for _, raw := range arr {
+				if c, ok := raw.(map[string]any); ok {
+					id, _ := c["clientId"].(float64)
+					if int(id) == clientId {
+						if email, ok := c["email"].(string); ok && email != "" {
+							return email
+						}
+						if auth, ok := c["auth"].(string); ok && auth != "" {
+							return "auth:" + auth
+						}
+						return fmt.Sprintf("id:%d", clientId)
+					}
+				}
+			}
+		}
+	}
+	return fmt.Sprintf("id:%d", clientId)
 }
 
 func (s *InboundService) getAllEmails() ([]string, error) {
@@ -548,6 +685,9 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 			tx.Rollback()
 		}
 	}()
+
+	// Ensure all clients have clientId before saving
+	s.ensureClientIdsInSettings(inbound)
 
 	err = tx.Save(inbound).Error
 	if err == nil {
@@ -837,6 +977,9 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 	oldInbound.Settings = inbound.Settings
 	oldInbound.StreamSettings = inbound.StreamSettings
 	oldInbound.Sniffing = inbound.Sniffing
+	oldInbound.ExternalAddr = inbound.ExternalAddr
+	oldInbound.ExternalAddrTls = inbound.ExternalAddrTls
+	oldInbound.ExternalPort = inbound.ExternalPort
 	oldInbound.Tag, err = s.resolveInboundTag(inbound, inbound.Id)
 	if err != nil {
 		return inbound, false, err
@@ -881,6 +1024,9 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 			}
 		}
 	}
+
+	// Ensure all clients have clientId before saving
+	s.ensureClientIdsInSettings(oldInbound)
 
 	if err = tx.Save(oldInbound).Error; err != nil {
 		return inbound, false, err
