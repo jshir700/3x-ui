@@ -1,4 +1,4 @@
-package service
+﻿package service
 
 import (
 	_ "embed"
@@ -6,19 +6,20 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/database"
-	"github.com/mhsanaei/3x-ui/v3/database/model"
-	"github.com/mhsanaei/3x-ui/v3/logger"
-	"github.com/mhsanaei/3x-ui/v3/util/common"
-	"github.com/mhsanaei/3x-ui/v3/util/random"
-	"github.com/mhsanaei/3x-ui/v3/util/reflect_util"
-	"github.com/mhsanaei/3x-ui/v3/web/entity"
-	"github.com/mhsanaei/3x-ui/v3/xray"
+	"github.com/jshir700/3x-ui/v3/database"
+	"github.com/jshir700/3x-ui/v3/database/model"
+	"github.com/jshir700/3x-ui/v3/logger"
+	"github.com/jshir700/3x-ui/v3/util/common"
+	"github.com/jshir700/3x-ui/v3/util/random"
+	"github.com/jshir700/3x-ui/v3/util/reflect_util"
+	"github.com/jshir700/3x-ui/v3/web/entity"
+	"github.com/jshir700/3x-ui/v3/xray"
 )
 
 //go:embed config.json
@@ -72,6 +73,10 @@ var defaultValueMap = map[string]string{
 	"subShowInfo":                 "true",
 	"subEmailInRemark":            "false",
 	"subURI":                      "",
+	"subUriScheme":                "https",
+	"subUriAddress":               "",
+	"subUriPort":                  "0",
+	"subUriPath":                  "/sub/",
 	"subJsonPath":                 "/json/",
 	"subJsonURI":                  "",
 	"subClashEnable":              "true",
@@ -167,6 +172,10 @@ func (s *SettingService) GetAllSetting() (*entity.AllSetting, error) {
 		fieldV := v.FieldByName(field.Name)
 		switch t := fieldV.Interface().(type) {
 		case int:
+			if value == "" {
+				fieldV.SetInt(0)
+				return nil
+			}
 			n, err := strconv.ParseInt(value, 10, 64)
 			if err != nil {
 				return err
@@ -215,6 +224,11 @@ func (s *SettingService) GetAllSettingView() (*entity.AllSettingView, error) {
 	view.HasLdapPassword = secretConfigured(allSetting.LdapPassword)
 	view.HasWarpSecret = secretConfigured(mustString(s.GetWarp()))
 	view.HasNordSecret = secretConfigured(mustString(s.GetNord()))
+	view.SubPortLocked = s.IsDockerBridge()
+	if view.SubPortLocked {
+		view.SubPort = 2096
+		view.SubExternalPort = GetLastSubExternalPort()
+	}
 	var apiTokenCount int64
 	if err := database.GetDB().Model(model.ApiToken{}).Where("enabled = ?", true).Count(&apiTokenCount).Error; err == nil {
 		view.HasApiToken = apiTokenCount > 0
@@ -231,6 +245,45 @@ func secretConfigured(value string) bool {
 
 func mustString(value string, _ error) string {
 	return value
+}
+
+// IsDockerBridge returns true when the panel is running inside a Docker
+// container in bridge (default) network mode. In this mode the container
+// has its own network namespace, so docker-proxy port mappings are static
+// and won't follow a subPort change. Host-mode and bare-metal installs
+// return false — their listening ports are directly reachable on the host.
+func (s *SettingService) IsDockerBridge() bool {
+	if _, err := os.Stat("/.dockerenv"); os.IsNotExist(err) {
+		return false
+	}
+	if os.Getenv("XUI_DOCKER_NETWORK") == "host" {
+		return false
+	}
+	return true
+}
+
+// lastSubExternalPort stores the host-side port observed from the most recent
+// incoming subscription request. It is set by the sub controller and read by
+// GetAllSettingView so the panel UI can display the real external port.
+var lastSubExternalPort int
+
+func SetLastSubExternalPort(port int) {
+	if port > 0 {
+		lastSubExternalPort = port
+	}
+}
+
+func GetLastSubExternalPort() int {
+	if lastSubExternalPort > 0 {
+		return lastSubExternalPort
+	}
+	if envPort := os.Getenv("XUI_SUB_EXTERNAL_PORT"); envPort != "" {
+		if port, err := strconv.Atoi(envPort); err == nil && port > 0 {
+			lastSubExternalPort = port
+			return port
+		}
+	}
+	return lastSubExternalPort
 }
 
 func (s *SettingService) ResetSettings() error {
@@ -570,7 +623,14 @@ func (s *SettingService) GetSubListen() (string, error) {
 }
 
 func (s *SettingService) GetSubPort() (int, error) {
-	return s.getInt("subPort")
+	port, err := s.getInt("subPort")
+	if err != nil {
+		return 0, err
+	}
+	if s.IsDockerBridge() {
+		return 2096, nil
+	}
+	return port, nil
 }
 
 func (s *SettingService) GetSubPath() (string, error) {
@@ -799,6 +859,10 @@ func (s *SettingService) UpdateAllSetting(allSetting *entity.AllSetting) error {
 	}
 	if err := allSetting.CheckValid(); err != nil {
 		return err
+	}
+
+	if s.IsDockerBridge() {
+		allSetting.SubPort = 2096
 	}
 
 	v := reflect.ValueOf(allSetting).Elem()

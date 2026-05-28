@@ -57,7 +57,7 @@ function emptyForm(): FormState {
     quantity: 1,
     subId: '',
     comment: '',
-    flow: '',
+    flow: TLS_FLOW_CONTROL.VISION,
     limitIp: 0,
     totalGB: 0,
     expiryTime: 0,

@@ -237,7 +237,10 @@ function isExpanded(id) {
       <template #expandedRowRender="{ record }">
         <NodeHistoryPanel :node="record" />
       </template>
-      <a-table-column :title="t('pages.nodes.name')" data-index="name" :ellipsis="true">
+      <a-table-column data-index="name" :ellipsis="true">
+        <template #title>
+          <span style="display:flex;justify-content:center;width:100%">{{ t('pages.nodes.name') }}</span>
+        </template>
         <template #default="{ record }">
           <div class="name-cell">
             <span class="name">{{ record.name }}</span>
@@ -246,7 +249,7 @@ function isExpanded(id) {
         </template>
       </a-table-column>
 
-      <a-table-column data-index="url" :ellipsis="true">
+      <a-table-column data-index="url" align="center" :ellipsis="true">
         <template #title>
           <span class="address-header">
             {{ t('pages.nodes.address') }}

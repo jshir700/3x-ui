@@ -1,4 +1,5 @@
-import { Collapse, Divider, Input, InputNumber, Switch } from 'antd';
+import { useMemo } from 'react';
+import { Collapse, Divider, Input, InputNumber, Select, Switch } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { AllSetting } from '@/models/setting';
 import SettingListItem from '@/components/SettingListItem';
@@ -23,6 +24,23 @@ function normalizePath(input: string): string {
 export default function SubscriptionGeneralTab({ allSetting, updateSetting }: SubscriptionGeneralTabProps) {
   const { t } = useTranslation();
 
+  const subPreviewUrl = useMemo(() => {
+    const scheme = allSetting.subUriScheme || 'https';
+    const addr = allSetting.subUriAddress?.trim();
+    const port = allSetting.subUriPort;
+    const path = allSetting.subUriPath || '/sub/';
+    if (addr) {
+      const defaultPort = port && port > 0 ? `:${port}` : '';
+      return `${scheme}://${addr}${defaultPort}${path}`;
+    }
+    const hostname = window.location.hostname;
+    const subPort = allSetting.subPortLocked
+      ? (allSetting.subExternalPort || 2096)
+      : (allSetting.subPort || 2096);
+    const subPath = allSetting.subPath || '/sub/';
+    return `${scheme}://${hostname}:${subPort}${subPath}`;
+  }, [allSetting.subUriScheme, allSetting.subUriAddress, allSetting.subUriPort, allSetting.subUriPath, allSetting.subPort, allSetting.subPath]);
+
   return (
     <Collapse defaultActiveKey="1" items={[
       {
@@ -32,12 +50,11 @@ export default function SubscriptionGeneralTab({ allSetting, updateSetting }: Su
           <>
             <SettingListItem paddings="small" title={t('pages.settings.subEnable')} description={t('pages.settings.subEnableDesc')}>
               <Switch checked={allSetting.subEnable} onChange={(v) => updateSetting({ subEnable: v })} />
-            </SettingListItem>
-            <SettingListItem paddings="small" title="JSON subscription" description={t('pages.settings.subJsonEnable')}>
-              <Switch checked={allSetting.subJsonEnable} onChange={(v) => updateSetting({ subJsonEnable: v })} />
-            </SettingListItem>
-            <SettingListItem paddings="small" title="Clash / Mihomo subscription">
-              <Switch checked={allSetting.subClashEnable} onChange={(v) => updateSetting({ subClashEnable: v })} />
+              {allSetting.subEnable && (
+                <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>
+                  {subPreviewUrl}
+                </div>
+              )}
             </SettingListItem>
             <SettingListItem paddings="small" title={t('pages.settings.subListen')} description={t('pages.settings.subListenDesc')}>
               <Input value={allSetting.subListen} onChange={(e) => updateSetting({ subListen: e.target.value })} />
@@ -46,8 +63,16 @@ export default function SubscriptionGeneralTab({ allSetting, updateSetting }: Su
               <Input value={allSetting.subDomain} onChange={(e) => updateSetting({ subDomain: e.target.value })} />
             </SettingListItem>
             <SettingListItem paddings="small" title={t('pages.settings.subPort')} description={t('pages.settings.subPortDesc')}>
-              <InputNumber value={allSetting.subPort} min={1} max={65535} style={{ width: '100%' }}
-                onChange={(v) => updateSetting({ subPort: Number(v) || 0 })} />
+              <div style={{ width: '100%' }}>
+                <InputNumber value={allSetting.subPort} min={1} max={65535} style={{ width: '100%' }}
+                  disabled={allSetting.subPortLocked}
+                  onChange={(v) => updateSetting({ subPort: Number(v) || 0 })} />
+                {allSetting.subPortLocked && (
+                  <p style={{ color: '#8c8c8c', fontSize: 12, margin: '4px 0 0 0' }}>
+                    {t('pages.settings.subPortLockedHint', { port: allSetting.subExternalPort || '?' })}
+                  </p>
+                )}
+              </div>
             </SettingListItem>
             <SettingListItem paddings="small" title={t('pages.settings.subPath')} description={t('pages.settings.subPathDesc')}>
               <Input
@@ -58,8 +83,40 @@ export default function SubscriptionGeneralTab({ allSetting, updateSetting }: Su
               />
             </SettingListItem>
             <SettingListItem paddings="small" title={t('pages.settings.subURI')} description={t('pages.settings.subURIDesc')}>
-              <Input value={allSetting.subURI} placeholder="(http|https)://domain[:port]/path/"
-                onChange={(e) => updateSetting({ subURI: e.target.value })} />
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <Select
+                  value={allSetting.subUriScheme}
+                  style={{ width: 90 }}
+                  onChange={(v) => updateSetting({ subUriScheme: v })}
+                  options={[
+                    { value: 'http', label: 'http' },
+                    { value: 'https', label: 'https' },
+                  ]}
+                />
+                <span>://</span>
+                <Input
+                  value={allSetting.subUriAddress}
+                  placeholder={t('subUriAddressPlaceholder')}
+                  style={{ flex: 1 }}
+                  onChange={(e) => updateSetting({ subUriAddress: e.target.value })}
+                />
+                <span>:</span>
+                <InputNumber
+                  value={allSetting.subUriPort || undefined}
+                  min={1}
+                  max={65535}
+                  style={{ width: 90 }}
+                  placeholder={t('pages.inbounds.port')}
+                  onChange={(v) => updateSetting({ subUriPort: v != null ? Number(v) : 0 })}
+                />
+                <Input
+                  value={allSetting.subUriPath}
+                  placeholder="/sub/"
+                  style={{ width: 100 }}
+                  onChange={(e) => updateSetting({ subUriPath: sanitizePath(e.target.value) })}
+                  onBlur={() => updateSetting({ subUriPath: normalizePath(allSetting.subUriPath) })}
+                />
+              </div>
             </SettingListItem>
           </>
         ),

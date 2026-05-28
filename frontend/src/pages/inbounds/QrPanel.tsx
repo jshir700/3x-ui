@@ -73,21 +73,27 @@ export default function QrPanel({
   }
 
   async function copyImage() {
-    const svgEl = qrRef.current?.querySelector('svg') as SVGSVGElement | null;
-    const blob = await svgToPngBlob(svgEl, size);
+    const blob = await getQrBlob();
     if (!blob) return;
     try {
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-      messageApi.success(t('copied'));
+      messageApi.success(t('copiedQrImage'));
     } catch {
       downloadImageBlob(blob, remark);
     }
   }
 
   async function downloadImage() {
-    const svgEl = qrRef.current?.querySelector('svg') as SVGSVGElement | null;
-    const blob = await svgToPngBlob(svgEl, size);
+    const blob = await getQrBlob();
     if (blob) downloadImageBlob(blob, remark);
+  }
+
+  async function getQrBlob(): Promise<Blob | null> {
+    const canvas = qrRef.current?.querySelector('canvas') as HTMLCanvasElement | null;
+    if (canvas) return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    const svgEl = qrRef.current?.querySelector('svg') as SVGSVGElement | null;
+    if (svgEl) return svgToPngBlob(svgEl, size);
+    return null;
   }
 
   return (
@@ -111,12 +117,12 @@ export default function QrPanel({
       </div>
       {showQr && (
         <div ref={qrRef} className="qr-panel-canvas">
-          <Tooltip title={t('copy')}>
+          <Tooltip title={t('clickToCopyImage')}>
             <QRCode
               className="qr-code"
               value={value}
               size={size}
-              type="svg"
+              type="canvas"
               bordered={false}
               color="#000000"
               bgColor="#ffffff"

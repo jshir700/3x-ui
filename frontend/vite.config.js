@@ -180,7 +180,6 @@ export default defineConfig({
         xray: path.resolve(__dirname, 'xray.html'),
         nodes: path.resolve(__dirname, 'nodes.html'),
         apiDocs: path.resolve(__dirname, 'api-docs.html'),
-        subpage: path.resolve(__dirname, 'subpage.html'),
         subscription: path.resolve(__dirname, 'subscription.html'),
       },
       output: {

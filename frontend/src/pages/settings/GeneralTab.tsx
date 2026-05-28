@@ -24,6 +24,23 @@ interface GeneralTabProps {
 
 const REMARK_MODELS: Record<string, string> = { i: 'Inbound', e: 'Email', o: 'Other' };
 const REMARK_SEPARATORS = [' ', '-', '_', '@', ':', '~', '|', ',', '.', '/'];
+const TIMEZONES: string[] = [
+  'Local',
+  'UTC', 'GMT',
+  'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+  'America/Anchorage', 'Pacific/Honolulu',
+  'America/Toronto', 'America/Vancouver', 'America/Mexico_City',
+  'America/Sao_Paulo', 'America/Argentina/Buenos_Aires',
+  'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Madrid',
+  'Europe/Rome', 'Europe/Amsterdam', 'Europe/Stockholm', 'Europe/Zurich',
+  'Europe/Moscow', 'Europe/Kyiv', 'Europe/Istanbul',
+  'Asia/Tehran', 'Asia/Dubai', 'Asia/Kolkata', 'Asia/Dhaka',
+  'Asia/Bangkok', 'Asia/Singapore', 'Asia/Shanghai', 'Asia/Tokyo',
+  'Asia/Seoul', 'Asia/Hong_Kong', 'Asia/Taipei',
+  'Australia/Sydney', 'Australia/Melbourne', 'Pacific/Auckland',
+  'Africa/Cairo', 'Africa/Lagos', 'Africa/Johannesburg',
+];
+
 const DATEPICKER_LIST: { name: string; value: 'gregorian' | 'jalalian' }[] = [
   { name: 'Gregorian (Standard)', value: 'gregorian' },
   { name: 'Jalalian (شمسی)', value: 'jalalian' },
@@ -160,8 +177,8 @@ export default function GeneralTab({ allSetting, updateSetting }: GeneralTabProp
 
             <SettingListItem
               paddings="small"
-              title="Trusted proxy CIDRs"
-              description="Comma-separated IPs/CIDRs allowed to set forwarded host, proto, and client IP headers."
+              title={t('pages.settings.trustedProxyCIDRs')}
+              description={t('pages.settings.trustedProxyCIDRsDesc')}
             >
               <Input
                 value={allSetting.trustedProxyCIDRs}
@@ -245,7 +262,16 @@ export default function GeneralTab({ allSetting, updateSetting }: GeneralTabProp
         children: (
           <>
             <SettingListItem paddings="small" title={t('pages.settings.timeZone')} description={t('pages.settings.timeZoneDesc')}>
-              <Input value={allSetting.timeLocation} onChange={(e) => updateSetting({ timeLocation: e.target.value })} />
+              <Select
+                showSearch
+                value={allSetting.timeLocation || 'Local'}
+                onChange={(v) => updateSetting({ timeLocation: v })}
+                style={{ width: '100%' }}
+                options={TIMEZONES.map((tz) => ({ value: tz, label: tz }))}
+                filterOption={(input, option) =>
+                  (option?.label as string)?.toLowerCase().includes(input.toLowerCase())
+                }
+              />
             </SettingListItem>
             <SettingListItem paddings="small" title={t('pages.settings.datepicker')} description={t('pages.settings.datepickerDescription')}>
               <Select
@@ -260,61 +286,61 @@ export default function GeneralTab({ allSetting, updateSetting }: GeneralTabProp
       },
       {
         key: '6',
-        label: 'LDAP',
+        label: t('pages.settings.ldap.title'),
         children: (
           <>
-            <SettingListItem paddings="small" title="Enable LDAP sync">
+            <SettingListItem paddings="small" title={t('pages.settings.ldap.enable')}>
               <Switch checked={allSetting.ldapEnable} onChange={(v) => updateSetting({ ldapEnable: v })} />
             </SettingListItem>
-            <SettingListItem paddings="small" title="LDAP host">
+            <SettingListItem paddings="small" title={t('pages.settings.ldap.host')}>
               <Input value={allSetting.ldapHost} onChange={(e) => updateSetting({ ldapHost: e.target.value })} />
             </SettingListItem>
-            <SettingListItem paddings="small" title="LDAP port">
+            <SettingListItem paddings="small" title={t('pages.settings.ldap.port')}>
               <InputNumber value={allSetting.ldapPort} min={1} max={65535} style={{ width: '100%' }}
                 onChange={(v) => updateSetting({ ldapPort: Number(v) || 0 })} />
             </SettingListItem>
-            <SettingListItem paddings="small" title="Use TLS (LDAPS)">
+            <SettingListItem paddings="small" title={t('pages.settings.ldap.useTLS')}>
               <Switch checked={allSetting.ldapUseTLS} onChange={(v) => updateSetting({ ldapUseTLS: v })} />
             </SettingListItem>
-            <SettingListItem paddings="small" title="Bind DN">
+            <SettingListItem paddings="small" title={t('pages.settings.ldap.bindDN')}>
               <Input value={allSetting.ldapBindDN} onChange={(e) => updateSetting({ ldapBindDN: e.target.value })} />
             </SettingListItem>
             <SettingListItem
               paddings="small"
               title={t('password')}
-              description={allSetting.hasLdapPassword ? 'Configured; leave blank to keep current password.' : 'Not configured.'}
+              description={allSetting.hasLdapPassword ? t('pages.settings.ldap.passwordConfigured') : t('pages.settings.ldap.passwordNotConfigured')}
             >
               <Input.Password
                 value={allSetting.ldapPassword}
-                placeholder={allSetting.hasLdapPassword ? 'Configured - enter a new value to replace' : ''}
+                placeholder={allSetting.hasLdapPassword ? t('pages.settings.ldap.passwordPlaceholder') : ''}
                 onChange={(e) => updateSetting({ ldapPassword: e.target.value })}
               />
             </SettingListItem>
-            <SettingListItem paddings="small" title="Base DN">
+            <SettingListItem paddings="small" title={t('pages.settings.ldap.baseDN')}>
               <Input value={allSetting.ldapBaseDN} onChange={(e) => updateSetting({ ldapBaseDN: e.target.value })} />
             </SettingListItem>
-            <SettingListItem paddings="small" title="User filter">
+            <SettingListItem paddings="small" title={t('pages.settings.ldap.userFilter')}>
               <Input value={allSetting.ldapUserFilter} onChange={(e) => updateSetting({ ldapUserFilter: e.target.value })} />
             </SettingListItem>
-            <SettingListItem paddings="small" title="User attribute (username/email)">
+            <SettingListItem paddings="small" title={t('pages.settings.ldap.userAttr')}>
               <Input value={allSetting.ldapUserAttr} onChange={(e) => updateSetting({ ldapUserAttr: e.target.value })} />
             </SettingListItem>
-            <SettingListItem paddings="small" title="VLESS flag attribute">
+            <SettingListItem paddings="small" title={t('pages.settings.ldap.vlessField')}>
               <Input value={allSetting.ldapVlessField} onChange={(e) => updateSetting({ ldapVlessField: e.target.value })} />
             </SettingListItem>
-            <SettingListItem paddings="small" title="Generic flag attribute (optional)" description="If set, overrides VLESS flag — e.g. shadowInactive.">
+            <SettingListItem paddings="small" title={t('pages.settings.ldap.flagField')} description={t('pages.settings.ldap.flagFieldDesc')}>
               <Input value={allSetting.ldapFlagField} onChange={(e) => updateSetting({ ldapFlagField: e.target.value })} />
             </SettingListItem>
-            <SettingListItem paddings="small" title="Truthy values" description="Comma-separated; default: true,1,yes,on">
+            <SettingListItem paddings="small" title={t('pages.settings.ldap.truthyValues')} description={t('pages.settings.ldap.truthyValuesDesc')}>
               <Input value={allSetting.ldapTruthyValues} onChange={(e) => updateSetting({ ldapTruthyValues: e.target.value })} />
             </SettingListItem>
-            <SettingListItem paddings="small" title="Invert flag" description="Enable when the attribute means disabled (e.g. shadowInactive).">
+            <SettingListItem paddings="small" title={t('pages.settings.ldap.invertFlag')} description={t('pages.settings.ldap.invertFlagDesc')}>
               <Switch checked={allSetting.ldapInvertFlag} onChange={(v) => updateSetting({ ldapInvertFlag: v })} />
             </SettingListItem>
-            <SettingListItem paddings="small" title="Sync schedule" description="Cron-like string, e.g. @every 1m">
+            <SettingListItem paddings="small" title={t('pages.settings.ldap.syncCron')} description={t('pages.settings.ldap.syncCronDesc')}>
               <Input value={allSetting.ldapSyncCron} onChange={(e) => updateSetting({ ldapSyncCron: e.target.value })} />
             </SettingListItem>
-            <SettingListItem paddings="small" title="Inbound tags" description="Inbounds that LDAP sync may auto-create or auto-delete clients on.">
+            <SettingListItem paddings="small" title={t('pages.settings.ldap.inboundTags')} description={t('pages.settings.ldap.inboundTagsDesc')}>
               <>
                 <Select
                   mode="multiple"
@@ -324,25 +350,25 @@ export default function GeneralTab({ allSetting, updateSetting }: GeneralTabProp
                   options={inboundOptions}
                 />
                 {inboundOptions.length === 0 && (
-                  <div className="ldap-no-inbounds">No inbounds found. Create one in Inbounds first.</div>
+                  <div className="ldap-no-inbounds">{t('pages.settings.ldap.noInbounds')}</div>
                 )}
               </>
             </SettingListItem>
-            <SettingListItem paddings="small" title="Auto create clients">
+            <SettingListItem paddings="small" title={t('pages.settings.ldap.autoCreate')}>
               <Switch checked={allSetting.ldapAutoCreate} onChange={(v) => updateSetting({ ldapAutoCreate: v })} />
             </SettingListItem>
-            <SettingListItem paddings="small" title="Auto delete clients">
+            <SettingListItem paddings="small" title={t('pages.settings.ldap.autoDelete')}>
               <Switch checked={allSetting.ldapAutoDelete} onChange={(v) => updateSetting({ ldapAutoDelete: v })} />
             </SettingListItem>
-            <SettingListItem paddings="small" title="Default total (GB)">
+            <SettingListItem paddings="small" title={t('pages.settings.ldap.defaultTotalGB')}>
               <InputNumber value={allSetting.ldapDefaultTotalGB} min={0} style={{ width: '100%' }}
                 onChange={(v) => updateSetting({ ldapDefaultTotalGB: Number(v) || 0 })} />
             </SettingListItem>
-            <SettingListItem paddings="small" title="Default expiry (days)">
+            <SettingListItem paddings="small" title={t('pages.settings.ldap.defaultExpiryDays')}>
               <InputNumber value={allSetting.ldapDefaultExpiryDays} min={0} style={{ width: '100%' }}
                 onChange={(v) => updateSetting({ ldapDefaultExpiryDays: Number(v) || 0 })} />
             </SettingListItem>
-            <SettingListItem paddings="small" title="Default IP limit">
+            <SettingListItem paddings="small" title={t('pages.settings.ldap.defaultLimitIP')}>
               <InputNumber value={allSetting.ldapDefaultLimitIP} min={0} style={{ width: '100%' }}
                 onChange={(v) => updateSetting({ ldapDefaultLimitIP: Number(v) || 0 })} />
             </SettingListItem>

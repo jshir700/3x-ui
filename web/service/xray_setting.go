@@ -1,12 +1,12 @@
-package service
+﻿package service
 
 import (
 	_ "embed"
 	"encoding/json"
 	"slices"
 
-	"github.com/mhsanaei/3x-ui/v3/util/common"
-	"github.com/mhsanaei/3x-ui/v3/xray"
+	"github.com/jshir700/3x-ui/v3/util/common"
+	"github.com/jshir700/3x-ui/v3/xray"
 )
 
 // XraySettingService provides business logic for Xray configuration management.

@@ -193,15 +193,6 @@ export default function SettingsPage() {
         out.push(t('pages.settings.warnDefaultSubPath'));
       }
     }
-    if (allSetting.subJsonEnable) {
-      let p = allSetting.subJsonPath;
-      if (allSetting.subJsonURI) {
-        try { p = new URL(allSetting.subJsonURI).pathname; } catch { /* noop */ }
-      }
-      if (p === '/json/') {
-        out.push(t('pages.settings.warnDefaultJsonPath'));
-      }
-    }
     return out;
   }, [allSetting, t]);
 
@@ -251,17 +242,15 @@ export default function SettingsPage() {
         children: <SubscriptionGeneralTab allSetting={allSetting} updateSetting={updateSetting} />,
       },
     ];
-    if (allSetting.subJsonEnable || allSetting.subClashEnable) {
-      items.push({
-        key: '5',
-        label: (
-          <Tooltip title={isMobile ? `${t('pages.settings.subSettings')} (Formats)` : null}>
-            <span><CodeOutlined />{!isMobile && <> {t('pages.settings.subSettings')} (Formats)</>}</span>
-          </Tooltip>
-        ),
-        children: <SubscriptionFormatsTab allSetting={allSetting} updateSetting={updateSetting} />,
-      });
-    }
+    items.push({
+      key: '5',
+      label: (
+        <Tooltip title={isMobile ? `${t('pages.settings.subSettings')} (Formats)` : null}>
+          <span><CodeOutlined />{!isMobile && <> {t('pages.settings.subSettings')} (Formats)</>}</span>
+        </Tooltip>
+      ),
+      children: <SubscriptionFormatsTab allSetting={allSetting} updateSetting={updateSetting} />,
+    });
     return items;
   }, [allSetting, updateSetting, isMobile, t]);
 

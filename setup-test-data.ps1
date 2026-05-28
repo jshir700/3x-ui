@@ -126,17 +126,17 @@ function New-Node($name, $address, $port, $scheme, $remark) {
     return $result.obj.id
 }
 
-function New-Subscription($remark, $inboundIds, $format, $title) {
-    $ids = $inboundIds -join ','
+function New-Subscription($remark, $emails, $format, $title) {
+    $emailsStr = $emails -join ','
     # Use JSON - the Subscription model has json tags but no form tags
     $jsonBody = @{
         remark       = $remark
-        inboundIds   = $ids
+        clientEmails = $emailsStr
         format       = $format
         title        = $title
         enable       = $true
         showInfo     = $true
-        updateInterval = 12
+        updateInterval = 720
         supportUrl   = "https://example.com/support"
         profileUrl   = "https://example.com/profile"
         announce     = "Welcome to test subscription"
@@ -150,15 +150,65 @@ function New-Subscription($remark, $inboundIds, $format, $title) {
 }
 
 # ------------------------------------------------------------
+# Cleanup — delete all existing data so repeated runs don't accumulate
+# ------------------------------------------------------------
+function Remove-AllTestData {
+    Write-Host "=== Cleaning up existing data ===" -ForegroundColor Cyan
+
+    $delCount = 0
+
+    # Delete all subscriptions
+    $listResp = Api-Get "/panel/api/subscription/list"
+    if ($listResp.success -and $listResp.obj) {
+        foreach ($sub in $listResp.obj) {
+            $csrf = Get-CsrfToken
+            $r = & $curl -s -b $cookieJar -X POST -H "X-CSRF-Token: $csrf" "$panelUrl/panel/api/subscription/del/$($sub.id)" 2>$null | ConvertFrom-Json
+            if ($r.success) { $delCount++ }
+        }
+        Write-Host "  Deleted $delCount subscriptions" -ForegroundColor DarkGray
+    }
+
+    # Delete all inbounds
+    $delCount = 0
+    $listResp = Api-Get "/panel/api/inbounds/list"
+    if ($listResp.success -and $listResp.obj) {
+        $ibList = if ($listResp.obj -is [array]) { $listResp.obj } else { $listResp.obj.inbounds }
+        foreach ($ib in $ibList) {
+            $csrf = Get-CsrfToken
+            $r = & $curl -s -b $cookieJar -X POST -H "X-CSRF-Token: $csrf" "$panelUrl/panel/api/inbounds/del/$($ib.id)" 2>$null | ConvertFrom-Json
+            if ($r.success) { $delCount++ }
+        }
+        Write-Host "  Deleted $delCount inbounds" -ForegroundColor DarkGray
+    }
+
+    # Delete all nodes
+    $delCount = 0
+    $listResp = Api-Get "/panel/api/nodes/list"
+    if ($listResp.success -and $listResp.obj) {
+        foreach ($node in $listResp.obj) {
+            $csrf = Get-CsrfToken
+            $r = & $curl -s -b $cookieJar -X POST -H "X-CSRF-Token: $csrf" "$panelUrl/panel/api/nodes/del/$($node.id)" 2>$null | ConvertFrom-Json
+            if ($r.success) { $delCount++ }
+        }
+        Write-Host "  Deleted $delCount nodes" -ForegroundColor DarkGray
+    }
+
+    Write-Host "=== Cleanup complete ===" -ForegroundColor Green
+}
+
+# ------------------------------------------------------------
 # Main
 # ------------------------------------------------------------
 Write-Host "=== Login ===" -ForegroundColor Cyan
 Login
 
-# Track created IDs
+Remove-AllTestData
+
+# Track created IDs and emails
 $allInboundIds = @()
 $allSubIds = @()
 $inboundIdsByProtocol = @{}
+$allClientEmails = @()
 
 # Protocol definitions with settings builders
 $protocols = @(
@@ -401,6 +451,15 @@ foreach ($proto in $protocols) {
         if ($id) {
             $allInboundIds += $id
             $inboundIdsByProtocol[$protoName] += $id
+            # Collect client emails for subscriptions — only from protocols
+            # that produce subscription links.
+            if ($protoName -in @('vmess','vless','trojan','shadowsocks','hysteria','hysteria2')) {
+                $settingsObj = $settings | ConvertFrom-Json
+                $entries = @($settingsObj.clients) + @($settingsObj.peers)
+                foreach ($entry in $entries) {
+                    if ($entry.email) { $allClientEmails += $entry.email }
+                }
+            }
         }
     }
 }
@@ -447,16 +506,22 @@ $subTitles = @(
     'Unlimited Data','Budget Saver','Pro Account','Cloud Gateway','Ultra Fast'
 )
 
-# Distribute inbounds across subscriptions
-$inboundPool = @($allInboundIds)
-# If no new inbounds were created (e.g. they already exist from a previous
-# run), fetch the existing inbound list so subscriptions have data to link.
-if ($inboundPool.Count -eq 0) {
-    Write-Host "  No new inbounds created — fetching existing inbound IDs from API" -ForegroundColor DarkGray
+# Distribute client emails across subscriptions
+$emailPool = @($allClientEmails)
+# If no new emails were collected (e.g. inbounds already exist from a
+# previous run), fetch the existing inbounds and extract their emails.
+if ($emailPool.Count -eq 0) {
+    Write-Host "  No new emails collected — fetching existing inbounds from API" -ForegroundColor DarkGray
     $listResp = Api-Get "/panel/api/inbounds/list"
     if ($listResp.success -and $listResp.obj) {
-        $inboundPool = @($listResp.obj | ForEach-Object { $_.id })
-        Write-Host "  Found $($inboundPool.Count) existing inbounds" -ForegroundColor DarkGray
+        foreach ($ib in $listResp.obj) {
+            $settingsObj = if ($ib.settings -is [string]) { $ib.settings | ConvertFrom-Json } else { $ib.settings }
+            $entries = @($settingsObj.clients) + @($settingsObj.peers)
+            foreach ($entry in $entries) {
+                if ($entry.email) { $emailPool += $entry.email }
+            }
+        }
+        Write-Host "  Found $($emailPool.Count) client emails from existing inbounds" -ForegroundColor DarkGray
     }
 }
 $rng = New-Object Random
@@ -466,13 +531,11 @@ for ($i = 1; $i -le 20; $i++) {
     $title = $subTitles[$i - 1]
     $format = $subFormats[$i % 4]
 
-    # Pick 2-5 random inbounds for each subscription
-    $count = $rng.Next(2, 6)
-    $selectedIds = $inboundPool | Get-Random -Count $count
-    # Include at least one node's port remapped inbounds where possible
-    # For now just use inbound IDs directly
+    # Pick 2-5 random client emails for each subscription
+    $count = [Math]::Min($rng.Next(2, 6), $emailPool.Count)
+    $selectedEmails = $emailPool | Get-Random -Count $count
 
-    $subId = New-Subscription $remark $selectedIds $format $title
+    $subId = New-Subscription $remark $selectedEmails $format $title
     if ($subId) { $allSubIds += $subId }
 }
 

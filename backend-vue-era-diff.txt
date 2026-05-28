@@ -1,0 +1,263 @@
+diff --git a/web/controller/inbound.go b/web/controller/inbound.go
+index 8436fd80..383121fa 100644
+--- a/web/controller/inbound.go
++++ b/web/controller/inbound.go
+@@ -371,4 +371,3 @@ func (a *InboundController) setFallbacks(c *gin.Context) {
+ 	a.xrayService.SetToNeedRestart()
+ 	jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.inboundUpdateSuccess"), nil)
+ }
+-
+diff --git a/web/controller/xui.go b/web/controller/xui.go
+index 7f7f81de..2da9a52e 100644
+--- a/web/controller/xui.go
++++ b/web/controller/xui.go
+@@ -48,7 +48,7 @@ func (a *XUIController) initRouter(g *gin.RouterGroup) {
+ 	a.xraySettingController = NewXraySettingController(g)
+ }
+ 
+-// All four panel pages now serve the Vue 3 builds from web/dist/
++// The main panel's HTML routes serve the pre-built SPA pages from distFS,
+ // instead of rendering the legacy Go templates. Each handler is a
+ // thin wrapper around serveDistPage so the basePath injection +
+ // no-cache headers stay centralised.
+diff --git a/web/service/client.go b/web/service/client.go
+index 43689d95..862ec695 100644
+--- a/web/service/client.go
++++ b/web/service/client.go
+@@ -604,6 +604,12 @@ func (s *ClientService) Update(inboundSvc *InboundService, id int, updated model
+ 			needRestart = true
+ 		}
+ 	}
++
++	if err := database.GetDB().Model(&model.ClientRecord{}).
++		Where("id = ?", id).
++		Update("updated_at", updated.UpdatedAt).Error; err != nil {
++		return needRestart, err
++	}
+ 	return needRestart, nil
+ }
+ 
+diff --git a/web/service/server.go b/web/service/server.go
+index e6e7bccb..9fc65b40 100644
+--- a/web/service/server.go
++++ b/web/service/server.go
+@@ -662,9 +662,6 @@ func (s *ServerService) GetXrayVersions() ([]string, error) {
+ 	var versions []string
+ 	for _, release := range releases {
+ 		tagVersion := strings.TrimPrefix(release.TagName, "v")
+-		if tagVersion == "26.5.3" {
+-			continue
+-		}
+ 		tagParts := strings.Split(tagVersion, ".")
+ 		if len(tagParts) != 3 {
+ 			continue
+@@ -853,7 +850,7 @@ func (s *ServerService) UpdateXray(version string) error {
+ 
+ 	// 4. Extract correct binary
+ 	if runtime.GOOS == "windows" {
+-		targetBinary := filepath.Join("bin", "xray-windows-amd64.exe")
++		targetBinary := filepath.Join(config.GetBinFolderPath(), "xray-windows-amd64.exe")
+ 		err = copyZipFile("xray.exe", targetBinary)
+ 	} else {
+ 		err = copyZipFile("xray", xray.GetBinaryPath())
+diff --git a/web/translation/ar-EG.json b/web/translation/ar-EG.json
+index e1ed1aed..7a2b288c 100644
+--- a/web/translation/ar-EG.json
++++ b/web/translation/ar-EG.json
+@@ -102,7 +102,8 @@
+     "xray": "إعدادات Xray",
+     "apiDocs": "توثيق API",
+     "logout": "تسجيل خروج",
+-    "link": "إدارة"
++    "link": "إدارة",
++    "donate": "تبرع"
+   },
+   "pages": {
+     "login": {
+diff --git a/web/translation/en-US.json b/web/translation/en-US.json
+index 89a2a9f8..667ac0bc 100644
+--- a/web/translation/en-US.json
++++ b/web/translation/en-US.json
+@@ -102,7 +102,8 @@
+     "xray": "Xray Configs",
+     "apiDocs": "API Docs",
+     "logout": "Log Out",
+-    "link": "Manage"
++    "link": "Manage",
++    "donate": "Donate"
+   },
+   "pages": {
+     "login": {
+diff --git a/web/translation/es-ES.json b/web/translation/es-ES.json
+index 4415d864..1cf78b39 100644
+--- a/web/translation/es-ES.json
++++ b/web/translation/es-ES.json
+@@ -102,7 +102,8 @@
+     "xray": "Ajustes Xray",
+     "apiDocs": "Documentación de la API",
+     "logout": "Cerrar Sesión",
+-    "link": "Gestionar"
++    "link": "Gestionar",
++    "donate": "Donar"
+   },
+   "pages": {
+     "login": {
+diff --git a/web/translation/fa-IR.json b/web/translation/fa-IR.json
+index 71dc3d68..fe863164 100644
+--- a/web/translation/fa-IR.json
++++ b/web/translation/fa-IR.json
+@@ -102,7 +102,8 @@
+     "xray": "پیکربندی ایکس‌ری",
+     "apiDocs": "مستندات API",
+     "logout": "خروج",
+-    "link": "مدیریت"
++    "link": "مدیریت",
++    "donate": "حمایت مالی"
+   },
+   "pages": {
+     "login": {
+diff --git a/web/translation/id-ID.json b/web/translation/id-ID.json
+index ce740d50..452f6897 100644
+--- a/web/translation/id-ID.json
++++ b/web/translation/id-ID.json
+@@ -102,7 +102,8 @@
+     "xray": "Konfigurasi Xray",
+     "apiDocs": "Dokumentasi API",
+     "logout": "Keluar",
+-    "link": "Kelola"
++    "link": "Kelola",
++    "donate": "Donasi"
+   },
+   "pages": {
+     "login": {
+diff --git a/web/translation/ja-JP.json b/web/translation/ja-JP.json
+index 7cba08ed..7d1970b1 100644
+--- a/web/translation/ja-JP.json
++++ b/web/translation/ja-JP.json
+@@ -102,7 +102,8 @@
+     "xray": "Xray設定",
+     "apiDocs": "API ドキュメント",
+     "logout": "ログアウト",
+-    "link": "リンク管理"
++    "link": "リンク管理",
++    "donate": "寄付"
+   },
+   "pages": {
+     "login": {
+diff --git a/web/translation/pt-BR.json b/web/translation/pt-BR.json
+index 711021a9..c977db3d 100644
+--- a/web/translation/pt-BR.json
++++ b/web/translation/pt-BR.json
+@@ -102,7 +102,8 @@
+     "xray": "Xray Configs",
+     "apiDocs": "Documentação da API",
+     "logout": "Sair",
+-    "link": "Gerenciar"
++    "link": "Gerenciar",
++    "donate": "Doar"
+   },
+   "pages": {
+     "login": {
+diff --git a/web/translation/ru-RU.json b/web/translation/ru-RU.json
+index 27d7c129..4208b59b 100644
+--- a/web/translation/ru-RU.json
++++ b/web/translation/ru-RU.json
+@@ -102,7 +102,8 @@
+     "xray": "Настройки Xray",
+     "apiDocs": "Документация API",
+     "logout": "Выход",
+-    "link": "Управление"
++    "link": "Управление",
++    "donate": "Поддержать"
+   },
+   "pages": {
+     "login": {
+diff --git a/web/translation/tr-TR.json b/web/translation/tr-TR.json
+index 0999658b..a2ffa111 100644
+--- a/web/translation/tr-TR.json
++++ b/web/translation/tr-TR.json
+@@ -102,7 +102,8 @@
+     "xray": "Xray Yapılandırmaları",
+     "apiDocs": "API Belgeleri",
+     "logout": "Çıkış Yap",
+-    "link": "Yönet"
++    "link": "Yönet",
++    "donate": "Bağış Yap"
+   },
+   "pages": {
+     "login": {
+diff --git a/web/translation/uk-UA.json b/web/translation/uk-UA.json
+index cb9f789b..e015bafd 100644
+--- a/web/translation/uk-UA.json
++++ b/web/translation/uk-UA.json
+@@ -102,7 +102,8 @@
+     "xray": "Конфігурації Xray",
+     "apiDocs": "Документація API",
+     "logout": "Вийти",
+-    "link": "Керувати"
++    "link": "Керувати",
++    "donate": "Підтримати"
+   },
+   "pages": {
+     "login": {
+diff --git a/web/translation/vi-VN.json b/web/translation/vi-VN.json
+index b2ffa275..be74b9ec 100644
+--- a/web/translation/vi-VN.json
++++ b/web/translation/vi-VN.json
+@@ -102,7 +102,8 @@
+     "xray": "Cài đặt Xray",
+     "apiDocs": "Tài liệu API",
+     "logout": "Đăng xuất",
+-    "link": "Quản lý"
++    "link": "Quản lý",
++    "donate": "Quyên góp"
+   },
+   "pages": {
+     "login": {
+diff --git a/web/translation/zh-CN.json b/web/translation/zh-CN.json
+index 3ff99e4d..8e800ac7 100644
+--- a/web/translation/zh-CN.json
++++ b/web/translation/zh-CN.json
+@@ -102,7 +102,8 @@
+     "xray": "Xray 设置",
+     "apiDocs": "API 文档",
+     "logout": "退出登录",
+-    "link": "管理"
++    "link": "管理",
++    "donate": "捐赠"
+   },
+   "pages": {
+     "login": {
+diff --git a/web/translation/zh-TW.json b/web/translation/zh-TW.json
+index 6965c9b1..2e335d09 100644
+--- a/web/translation/zh-TW.json
++++ b/web/translation/zh-TW.json
+@@ -102,7 +102,8 @@
+     "xray": "Xray 設定",
+     "apiDocs": "API 文件",
+     "logout": "退出登入",
+-    "link": "管理"
++    "link": "管理",
++    "donate": "捐贈"
+   },
+   "pages": {
+     "login": {
+diff --git a/web/web.go b/web/web.go
+index e903a016..b6c050f4 100644
+--- a/web/web.go
++++ b/web/web.go
+@@ -40,13 +40,7 @@ var i18nFS embed.FS
+ // distFS embeds the Vite-built frontend (web/dist/). Every user-facing
+ // HTML route is served straight out of this FS — the legacy Go
+ // templates and `web/assets/` tree are gone post-Phase 8.
+-//
+-// `all:` is required so files whose names start with `_` are NOT
+-// silently excluded by go:embed's default rules. Vite/rolldown emits
+-// `_plugin-vue_export-helper-<hash>.js` for the @vitejs/plugin-vue
+-// runtime; without `all:` the chunk would be missing from the binary
+-// at runtime → 404 → blank-page boot failure.
+-//
++
+ //go:embed all:dist
+ var distFS embed.FS
+ 

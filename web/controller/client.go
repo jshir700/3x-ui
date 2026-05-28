@@ -1,13 +1,14 @@
-package controller
+﻿package controller
 
 import (
 	"encoding/json"
 	"fmt"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/database/model"
-	"github.com/mhsanaei/3x-ui/v3/web/service"
-	"github.com/mhsanaei/3x-ui/v3/web/websocket"
+	"github.com/jshir700/3x-ui/v3/database/model"
+	"github.com/jshir700/3x-ui/v3/logger"
+	"github.com/jshir700/3x-ui/v3/web/service"
+	"github.com/jshir700/3x-ui/v3/web/websocket"
 
 	"github.com/gin-gonic/gin"
 )
@@ -17,10 +18,11 @@ func notifyClientsChanged() {
 }
 
 type ClientController struct {
-	clientService  service.ClientService
-	inboundService service.InboundService
-	xrayService    service.XrayService
-	settingService service.SettingService
+	clientService       service.ClientService
+	inboundService      service.InboundService
+	xrayService         service.XrayService
+	settingService      service.SettingService
+	subscriptionService service.SubscriptionService
 }
 
 func NewClientController(g *gin.RouterGroup) *ClientController {
@@ -39,7 +41,9 @@ func (a *ClientController) initRouter(g *gin.RouterGroup) {
 
 	g.POST("/add", a.create)
 	g.POST("/update/:email", a.update)
+	g.GET("/checkSubscriptions", a.checkSubscriptions)
 	g.POST("/del/:email", a.delete)
+	g.POST("/forceDel/:email", a.forceDel)
 	g.POST("/:email/attach", a.attach)
 	g.POST("/:email/detach", a.detach)
 	g.POST("/resetAllTraffics", a.resetAllTraffics)
@@ -51,6 +55,7 @@ func (a *ClientController) initRouter(g *gin.RouterGroup) {
 	g.POST("/clearIps/:email", a.clearIps)
 	g.POST("/onlines", a.onlines)
 	g.POST("/lastOnline", a.lastOnline)
+	g.POST("/reorder", a.reorder)
 }
 
 func (a *ClientController) list(c *gin.Context) {
@@ -68,7 +73,7 @@ func (a *ClientController) listPaged(c *gin.Context) {
 		jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.obtain"), err)
 		return
 	}
-	resp, err := a.clientService.ListPaged(&a.inboundService, &a.settingService, params)
+	resp, err := a.clientService.ListPaged(&a.inboundService, &a.settingService, &a.subscriptionService, params)
 	if err != nil {
 		jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.obtain"), err)
 		return
@@ -92,15 +97,23 @@ func (a *ClientController) get(c *gin.Context) {
 }
 
 func (a *ClientController) create(c *gin.Context) {
-	var payload service.ClientCreatePayload
+	var payload struct {
+		service.ClientCreatePayload
+		SubscriptionIds []int `json:"subscriptionIds"`
+	}
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
 	}
-	needRestart, err := a.clientService.Create(&a.inboundService, &payload)
+	needRestart, err := a.clientService.Create(&a.inboundService, &payload.ClientCreatePayload)
 	if err != nil {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
+	}
+	if len(payload.SubscriptionIds) > 0 {
+		if syncErr := a.subscriptionService.SyncSubscriptionAssociations(payload.Client.Email, payload.SubscriptionIds); syncErr != nil {
+			logger.Error("Failed to sync subscription associations:", syncErr)
+		}
 	}
 	jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.inboundClientAddSuccess"), nil)
 	if needRestart {
@@ -111,15 +124,23 @@ func (a *ClientController) create(c *gin.Context) {
 
 func (a *ClientController) update(c *gin.Context) {
 	email := c.Param("email")
-	var updated model.Client
-	if err := c.ShouldBindJSON(&updated); err != nil {
+	var payload struct {
+		model.Client
+		SubscriptionIds []int `json:"subscriptionIds"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
 	}
-	needRestart, err := a.clientService.UpdateByEmail(&a.inboundService, email, updated)
+	needRestart, err := a.clientService.UpdateByEmail(&a.inboundService, email, payload.Client)
 	if err != nil {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
+	}
+	if payload.SubscriptionIds != nil {
+		if syncErr := a.subscriptionService.SyncSubscriptionAssociations(email, payload.SubscriptionIds); syncErr != nil {
+			logger.Error("Failed to sync subscription associations:", syncErr)
+		}
 	}
 	jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.inboundClientUpdateSuccess"), nil)
 	if needRestart {
@@ -137,6 +158,50 @@ func (a *ClientController) delete(c *gin.Context) {
 		return
 	}
 	jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.inboundClientDeleteSuccess"), nil)
+	if needRestart {
+		a.xrayService.SetToNeedRestart()
+	}
+	notifyClientsChanged()
+}
+
+func (a *ClientController) checkSubscriptions(c *gin.Context) {
+	email := c.Query("email")
+	if email == "" {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), nil)
+		return
+	}
+	affected, toBeDeleted, err := a.subscriptionService.CheckClientSubscriptions(email)
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	type subInfo struct {
+		Id     int    `json:"id"`
+		SubId  string `json:"subId"`
+		Remark string `json:"remark"`
+		Title  string `json:"title"`
+	}
+	formatSubs := func(subs []*model.Subscription) []subInfo {
+		out := make([]subInfo, 0, len(subs))
+		for _, s := range subs {
+			out = append(out, subInfo{Id: s.Id, SubId: s.SubId, Remark: s.Remark, Title: s.Title})
+		}
+		return out
+	}
+	jsonObj(c, gin.H{
+		"affected":    formatSubs(affected),
+		"toBeDeleted": formatSubs(toBeDeleted),
+	}, nil)
+}
+
+func (a *ClientController) forceDel(c *gin.Context) {
+	email := c.Param("email")
+	subsDeleted, needRestart, err := a.clientService.ForceDeleteByEmail(&a.inboundService, email)
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	jsonObj(c, gin.H{"success": true, "subsDeleted": subsDeleted}, nil)
 	if needRestart {
 		a.xrayService.SetToNeedRestart()
 	}
@@ -348,5 +413,27 @@ func (a *ClientController) detach(c *gin.Context) {
 	if needRestart {
 		a.xrayService.SetToNeedRestart()
 	}
+	notifyClientsChanged()
+}
+
+type reorderBody struct {
+	Ids []int `json:"ids"`
+}
+
+func (a *ClientController) reorder(c *gin.Context) {
+	var body reorderBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	if len(body.Ids) == 0 {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), nil)
+		return
+	}
+	if err := a.clientService.Reorder(body.Ids); err != nil {
+		jsonMsg(c, "Reorder failed", err)
+		return
+	}
+	jsonMsg(c, I18nWeb(c, "pages.inbounds.reorderSuccess"), nil)
 	notifyClientsChanged()
 }

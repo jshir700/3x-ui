@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />`
+    <meta name="color-scheme" content="dark light" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>Sign in</title>
+    <script type="module" crossorigin src="/assets/login-BMWIM9bU.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/rolldown-runtime-CF49elNu.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-DzPfPoSx.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-antd-DTL6hfVc.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-axios-DEA_RcOl.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-i18next-ChXp-0vH.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-react-Dm7kOjJN.js">
+    <link rel="modulepreload" crossorigin href="/assets/useTheme-DS2QR9HL.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-icons-BRy0s3yD.js">
+    <link rel="modulepreload" crossorigin href="/assets/messageBus-DT_9yGBC.js">
+    <link rel="stylesheet" crossorigin href="/assets/vendor-antd-B5BXDqMa.css">
+    <link rel="stylesheet" crossorigin href="/assets/login-JcfNey3e.css">
+  <script nonce="HK+G0q8ufx93dfDrm63ELw">window.X_UI_BASE_PATH="/";</script><meta name="csrf-token" content="71KX2522gYVy_buIO-NjEmBAmJKL0cLV8efC-PXYaJc"><meta name="base-path" content="/"></head>
+  <body>
+    <div id="message"></div>
+    <div id="app"></div>
+  </body>
+</html>

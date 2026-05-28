@@ -1,8 +1,8 @@
-package job
+﻿package job
 
 import (
-	"github.com/mhsanaei/3x-ui/v3/logger"
-	"github.com/mhsanaei/3x-ui/v3/web/service"
+	"github.com/jshir700/3x-ui/v3/logger"
+	"github.com/jshir700/3x-ui/v3/web/service"
 )
 
 // XrayUpdateJob checks for new Xray versions and updates automatically.

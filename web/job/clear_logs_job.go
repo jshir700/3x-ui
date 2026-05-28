@@ -1,12 +1,12 @@
-package job
+﻿package job
 
 import (
 	"io"
 	"os"
 	"path/filepath"
 
-	"github.com/mhsanaei/3x-ui/v3/logger"
-	"github.com/mhsanaei/3x-ui/v3/xray"
+	"github.com/jshir700/3x-ui/v3/logger"
+	"github.com/jshir700/3x-ui/v3/xray"
 )
 
 // ClearLogsJob clears old log files to prevent disk space issues.

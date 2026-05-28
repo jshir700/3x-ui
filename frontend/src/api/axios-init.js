@@ -100,10 +100,10 @@ export function setupAxios() {
       if (status === 403 && cfg && !cfg.__csrfRetried) {
         csrfToken = null;
         cfg.__csrfRetried = true;
-        const token = await ensureCsrfToken();
-        if (token) {
+        csrfToken = await fetchCsrfToken();
+        if (csrfToken) {
           cfg.headers = cfg.headers || {};
-          cfg.headers['X-CSRF-Token'] = token;
+          cfg.headers['X-CSRF-Token'] = csrfToken;
           // axios re-stringifies on retry, so unwind our qs.stringify before
           // letting the same request flow through the interceptor again.
           if (typeof cfg.data === 'string') cfg.data = qs.parse(cfg.data);

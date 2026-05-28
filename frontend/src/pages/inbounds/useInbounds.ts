@@ -207,10 +207,9 @@ export function useInbounds() {
     refreshingRef.current = true;
     try {
       const msg = await HttpUtil.get('/panel/api/inbounds/list/slim');
-      if (!msg?.success) return;
       await fetchLastOnlineMap();
       await fetchOnlineUsers();
-      setInbounds(Array.isArray(msg.obj) ? msg.obj : []);
+      setInbounds(msg?.success && Array.isArray(msg.obj) ? msg.obj : []);
     } finally {
       window.setTimeout(() => { refreshingRef.current = false; }, 500);
     }
@@ -335,13 +334,26 @@ export function useInbounds() {
   const totals = useMemo(() => {
     let up = 0;
     let down = 0;
+    let clients = 0;
+    const deactive: string[] = [];
+    const depleted: string[] = [];
+    const expiring: string[] = [];
+    const online: string[] = [];
     for (const ib of dbInbounds) {
       const rec = ib as unknown as { up?: number; down?: number };
       up += rec.up || 0;
       down += rec.down || 0;
+      const cc = clientCount[ib.id];
+      if (cc) {
+        clients += cc.clients;
+        for (const e of cc.deactive) deactive.push(e);
+        for (const e of cc.depleted) depleted.push(e);
+        for (const e of cc.expiring) expiring.push(e);
+        for (const e of cc.online) online.push(e);
+      }
     }
-    return { up, down };
-  }, [dbInbounds]);
+    return { up, down, clients, deactive, depleted, expiring, online };
+  }, [dbInbounds, clientCount]);
 
   return {
     fetched,

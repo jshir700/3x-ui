@@ -1,4 +1,4 @@
-package service
+﻿package service
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/logger"
+	"github.com/jshir700/3x-ui/v3/logger"
 )
 
 type xrayMetricsState struct {

@@ -1,4 +1,4 @@
-// Package model defines the database models and data structures used by the 3x-ui panel.
+﻿// Package model defines the database models and data structures used by the 3x-ui panel.
 package model
 
 import (
@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mhsanaei/3x-ui/v3/util/json_util"
-	"github.com/mhsanaei/3x-ui/v3/xray"
+	"github.com/jshir700/3x-ui/v3/util/json_util"
+	"github.com/jshir700/3x-ui/v3/xray"
 )
 
 // Protocol represents the protocol type for Xray inbounds.
@@ -227,6 +227,9 @@ func (i *Inbound) GenXrayInboundConfig() *xray.InboundConfig {
 	}
 	listen = fmt.Sprintf("\"%v\"", listen)
 	protocol := string(i.Protocol)
+	if i.Protocol == Hysteria2 {
+		protocol = string(Hysteria)
+	}
 	return &xray.InboundConfig{
 		Listen:         json_util.RawMessage(listen),
 		Port:           i.Port,
@@ -290,7 +293,7 @@ type Subscription struct {
 	Enable         bool   `json:"enable" gorm:"default:true"`
 	Format         string `json:"format" gorm:"size:16;default:base64"`
 	Password       string `json:"password" gorm:"size:256;default:''"`
-	InboundIds     string `json:"inboundIds" gorm:"type:text"`         // comma-separated inbound IDs in order
+	ClientEmails  string `json:"clientEmails" gorm:"column:client_emails;type:text"` // comma-separated client email addresses
 	ExpiryTime     int64  `json:"expiryTime" gorm:"default:0"`         // 0 = never expires
 	ShowInfo       bool   `json:"showInfo" gorm:"default:true"`
 	EmailInRemark  bool   `json:"emailInRemark" gorm:"default:false"`
@@ -342,8 +345,9 @@ type Client struct {
 	Enable   bool           `json:"enable" form:"enable"`          // Whether the client is enabled
 	TgID     int64          `json:"tgId" form:"tgId"`              // Telegram user ID for notifications
 	SubID    string         `json:"subId" form:"subId"`            // Subscription identifier
-	Comment  string         `json:"comment" form:"comment"`        // Client comment
-	Reset    int            `json:"reset" form:"reset"`            // Reset period in days
+	Comment   string         `json:"comment" form:"comment"`        // Client comment
+	Reset     int            `json:"reset" form:"reset"`            // Reset period in days
+	SortOrder int            `json:"sortOrder"`                     // Sort order within the inbound
 	CreatedAt int64         `json:"created_at,omitempty"`          // Creation timestamp
 	UpdatedAt int64         `json:"updated_at,omitempty"`          // Last update timestamp
 }
@@ -365,6 +369,7 @@ type ClientRecord struct {
 	TgID       int64  `json:"tgId" gorm:"column:tg_id"`
 	Comment    string `json:"comment"`
 	Reset      int    `json:"reset" gorm:"default:0"`
+	SortOrder  int    `json:"sortOrder" gorm:"default:999999999;index;column:sort_order"`
 	CreatedAt  int64  `json:"createdAt" gorm:"autoCreateTime:milli"`
 	UpdatedAt  int64  `json:"updatedAt" gorm:"autoUpdateTime:milli"`
 }

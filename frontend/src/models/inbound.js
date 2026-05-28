@@ -1549,6 +1549,7 @@ export class Inbound extends XrayCommonClass {
         clientStats = '',
         externalAddr = '',
         externalPort = 0,
+        externalAddrTls = true,
     ) {
         super();
         this.port = port;
@@ -1561,6 +1562,7 @@ export class Inbound extends XrayCommonClass {
         this.clientStats = clientStats;
         this.externalAddr = externalAddr;
         this.externalPort = externalPort;
+        this.externalAddrTls = externalAddrTls;
     }
     getClientStats() {
         return this.clientStats;
@@ -2434,6 +2436,7 @@ export class Inbound extends XrayCommonClass {
             json.clientStats,
             json.externalAddr,
             json.externalPort,
+            json.externalAddrTls !== undefined ? json.externalAddrTls : true,
         )
     }
 
@@ -2451,6 +2454,7 @@ export class Inbound extends XrayCommonClass {
             clientStats: this.clientStats,
             externalAddr: this.externalAddr,
             externalPort: this.externalPort,
+            externalAddrTls: this.externalAddrTls,
         };
 
         // Only add streamSettings if protocol supports it

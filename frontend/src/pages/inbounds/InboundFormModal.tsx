@@ -31,6 +31,7 @@ import {
   CaretUpOutlined,
   CaretDownOutlined,
   SettingOutlined,
+
 } from '@ant-design/icons';
 
 import {
@@ -64,7 +65,7 @@ import type { NodeRecord } from '@/hooks/useNodes';
 import './InboundFormModal.css';
 
 const { TextArea } = Input;
-const { Text, Paragraph } = Typography;
+const { Text } = Typography;
 
 interface InboundFormModalProps {
   open: boolean;
@@ -160,6 +161,13 @@ export default function InboundFormModal({
   availableNodes,
 }: InboundFormModalProps) {
   const { t } = useTranslation();
+
+  const labelWithHelp = (label: React.ReactNode, descKey: string) => (
+    <Tooltip title={t(descKey)}>
+      <span>{label}</span>
+    </Tooltip>
+  );
+
   const [messageApi, messageContextHolder] = message.useMessage();
   const selectableNodes = useMemo(
     () => (availableNodes || []).filter((n: NodeRecord) => n.enable),
@@ -181,6 +189,9 @@ export default function InboundFormModal({
   const [defaultKey, setDefaultKey] = useState('');
   const [fallbacks, setFallbacks] = useState<FallbackRow[]>([]);
   const [fallbackEditing, setFallbackEditing] = useState<Set<string>>(new Set());
+  const [webDomain, setWebDomain] = useState('');
+  const [externalAddrType, setExternalAddrType] = useState('');
+  const [externalAddrCustomValue, setExternalAddrCustomValue] = useState('');
 
   const isVlessLike = inboundRef.current?.protocol === Protocols.VLESS;
   const isFallbackHost = useMemo(() => {
@@ -219,6 +230,22 @@ export default function InboundFormModal({
 
   const externalProxyOn = Array.isArray(inboundRef.current?.stream?.externalProxy)
     && inboundRef.current.stream.externalProxy.length > 0;
+
+  const PROXYABLE_PROTOCOLS = useMemo(() => new Set([
+    Protocols.VMESS, Protocols.VLESS, Protocols.TROJAN,
+    Protocols.SHADOWSOCKS, Protocols.HTTP, Protocols.MIXED,
+  ]), []);
+  const canProxy = PROXYABLE_PROTOCOLS.has(inboundRef.current?.protocol);
+  const isTlsForced = inboundRef.current?.protocol === Protocols.TROJAN
+    || inboundRef.current?.protocol === Protocols.HYSTERIA;
+  const isTlsDisabled = inboundRef.current?.protocol === Protocols.SHADOWSOCKS
+    || inboundRef.current?.protocol === Protocols.TUNNEL
+    || inboundRef.current?.protocol === Protocols.WIREGUARD;
+  const showTlsSwitch = useMemo(() => {
+    const ib = inboundRef.current;
+    if (!ib || isTlsDisabled) return false;
+    return externalAddrType === 'custom' || (webDomain === '' && !!externalAddrCustomValue);
+  }, [externalAddrType, externalAddrCustomValue, webDomain, isTlsDisabled, inboundRef.current?.protocol]);
 
   const stampAdvancedTextFor = useCallback((slice: 'stream' | 'sniffing' | 'settings') => {
     const ib = inboundRef.current;
@@ -262,6 +289,17 @@ export default function InboundFormModal({
     );
   }, []);
 
+  const fetchWebDomain = useCallback(async () => {
+    try {
+      const msg = await HttpUtil.post('/panel/setting/all');
+      if (msg?.success && msg.obj?.webDomain) {
+        setWebDomain(msg.obj.webDomain);
+      }
+    } catch {
+      /* non-fatal */
+    }
+  }, []);
+
   const fetchDefaultCertSettings = useCallback(async () => {
     try {
       const msg = await HttpUtil.post('/panel/setting/defaultSettings');
@@ -275,13 +313,64 @@ export default function InboundFormModal({
     }
   }, []);
 
+  const initExternalFields = useCallback((dbIn: any) => {
+    if (dbIn.externalAddr) {
+      if (webDomain && dbIn.externalAddr === webDomain) {
+        setExternalAddrType('panel');
+      } else {
+        setExternalAddrType('custom');
+        setExternalAddrCustomValue(dbIn.externalAddr);
+      }
+    } else {
+      setExternalAddrType('');
+      setExternalAddrCustomValue('');
+    }
+  }, [webDomain]);
+
+  useEffect(() => {
+    if (!webDomain && externalAddrType === 'panel') {
+      setExternalAddrType('');
+    }
+  }, [webDomain, externalAddrType]);
+
+  useEffect(() => {
+    if (!webDomain || !open || mode !== 'edit' || !dbInbound) return;
+    if (dbInbound.externalAddr && dbInbound.externalAddr === webDomain) {
+      setExternalAddrType('panel');
+    }
+  }, [webDomain, open, mode, dbInbound]);
+
+  useEffect(() => {
+    const form = dbFormRef.current;
+    if (!form) return;
+    if (externalAddrType === 'panel') {
+      form.externalAddr = webDomain;
+    } else if (externalAddrType === 'custom') {
+      form.externalAddr = externalAddrCustomValue || '';
+    } else {
+      form.externalAddr = '';
+    }
+    refresh();
+  }, [externalAddrType]);
+
+  useEffect(() => {
+    const form = dbFormRef.current;
+    if (form && externalAddrType === 'custom') {
+      form.externalAddr = externalAddrCustomValue || '';
+      refresh();
+    }
+  }, [externalAddrCustomValue]);
+
   useEffect(() => {
     if (!open) return;
     setFallbackEditing(new Set());
     if (mode === 'edit' && dbInbound) {
       const parsed = (Inbound as any).fromJson(dbInbound.toInbound().toJson());
+      parsed.externalAddr = dbInbound.externalAddr || '';
+      parsed.externalPort = dbInbound.externalPort || 0;
       inboundRef.current = parsed;
       dbFormRef.current = new (DBInbound as any)(dbInbound);
+      initExternalFields(dbInbound);
       primeAdvancedJson();
       if (dbInbound.protocol === Protocols.VLESS || dbInbound.protocol === Protocols.TROJAN) {
         loadFallbacks(dbInbound.id);
@@ -299,13 +388,16 @@ export default function InboundFormModal({
       form.remark = '';
       form.total = 0;
       form.expiryTime = 0;
-      form.trafficReset = 'never';
+      form.trafficReset = 'monthly';
       dbFormRef.current = form;
+      setExternalAddrType('');
+      setExternalAddrCustomValue('');
       primeAdvancedJson();
       setFallbacks([]);
     }
     setActiveTabKey('basic');
     setAdvancedSectionKey('all');
+    fetchWebDomain();
     fetchDefaultCertSettings();
     refresh();
   }, [open, mode, dbInbound, primeAdvancedJson, loadFallbacks, fetchDefaultCertSettings, refresh]);
@@ -334,9 +426,19 @@ export default function InboundFormModal({
     if (!NODE_ELIGIBLE_PROTOCOLS.has(next) && dbFormRef.current) {
       dbFormRef.current.nodeId = null;
     }
+    const proxyable = PROXYABLE_PROTOCOLS.has(next);
+    if (!proxyable && dbFormRef.current) {
+      dbFormRef.current.externalPort = null;
+    }
+    const tlsForced = next === Protocols.TROJAN || next === Protocols.HYSTERIA;
+    const tlsDisabled = next === Protocols.SHADOWSOCKS
+      || next === Protocols.TUNNEL || next === Protocols.WIREGUARD;
+    if (tlsDisabled || tlsForced) {
+      if (dbFormRef.current) dbFormRef.current.externalAddrTls = true;
+    }
     primeAdvancedJson();
     refresh();
-  }, [mode, primeAdvancedJson, refresh]);
+  }, [mode, primeAdvancedJson, refresh, PROXYABLE_PROTOCOLS]);
 
   const onNetworkChange = useCallback((next: string) => {
     const ib = inboundRef.current;
@@ -869,6 +971,9 @@ export default function InboundFormModal({
         settings,
         streamSettings,
         sniffing,
+        externalAddr: form.externalAddr || '',
+        externalAddrTls: form.externalAddrTls !== undefined ? form.externalAddrTls : true,
+        externalPort: form.externalPort || 0,
       };
       if (form.nodeId != null) payload.nodeId = form.nodeId;
 
@@ -915,7 +1020,7 @@ export default function InboundFormModal({
 
   const renderBasicsTab = () => (
     <Form colon={false} labelCol={{ sm: { span: 8 } }} wrapperCol={{ sm: { span: 14 } }}>
-      <Form.Item label={t('enable')}>
+      <Form.Item label={labelWithHelp(t('enable'), 'pages.inbounds.enableDesc')}>
         <Switch checked={!!form.enable} onChange={(v) => { form.enable = v; refresh(); }} />
       </Form.Item>
       <Form.Item label={t('pages.inbounds.remark')}>
@@ -939,7 +1044,7 @@ export default function InboundFormModal({
           </Select>
         </Form.Item>
       )}
-      <Form.Item label={t('pages.inbounds.protocol')}>
+      <Form.Item label={labelWithHelp(t('pages.inbounds.protocol'), 'pages.inbounds.protocolDesc')}>
         <Select
           value={ib.protocol}
           disabled={mode === 'edit'}
@@ -948,14 +1053,14 @@ export default function InboundFormModal({
           {PROTOCOLS.map((p) => <Select.Option key={p} value={p}>{p}</Select.Option>)}
         </Select>
       </Form.Item>
-      <Form.Item label={t('pages.inbounds.address')}>
+      <Form.Item label={labelWithHelp(t('pages.inbounds.address'), 'pages.inbounds.listenDesc')}>
         <Input
           value={ib.listen}
           placeholder={t('pages.inbounds.monitorDesc')}
           onChange={(e) => { ib.listen = e.target.value; refresh(); }}
         />
       </Form.Item>
-      <Form.Item label={t('pages.inbounds.port')}>
+      <Form.Item label={labelWithHelp(t('pages.inbounds.port'), 'pages.inbounds.portDesc')}>
         <InputNumber
           value={ib.port}
           min={1}
@@ -963,7 +1068,64 @@ export default function InboundFormModal({
           onChange={(v) => { ib.port = Number(v) || 0; refresh(); }}
         />
       </Form.Item>
-      <Form.Item label={<Tooltip title={t('pages.inbounds.meansNoLimit')}>{t('pages.inbounds.totalFlow')}</Tooltip>}>
+      <Form.Item label={labelWithHelp(t('pages.inbounds.externalAddress'), 'pages.inbounds.externalAddressDesc')}>
+        {webDomain ? (
+          <>
+            <Select
+              value={externalAddrType}
+              style={{ width: '100%' }}
+              onChange={(v: string) => setExternalAddrType(v)}
+            >
+              <Select.Option value="panel">{t('pages.inbounds.extAddrPanel')} ({webDomain})</Select.Option>
+              <Select.Option value="custom">{t('pages.inbounds.extAddrCustom')}</Select.Option>
+              <Select.Option value="">{t('pages.inbounds.extAddrNone')}</Select.Option>
+            </Select>
+            {externalAddrType === 'custom' && (
+              <Input
+                value={externalAddrCustomValue}
+                placeholder={t('pages.inbounds.extAddrCustomPlaceholder')}
+                style={{ marginTop: 8 }}
+                onChange={(e) => setExternalAddrCustomValue(e.target.value)}
+              />
+            )}
+            {showTlsSwitch && (
+              <Form.Item
+                label={<span style={{ fontSize: 12, color: '#888' }}>{t('pages.inbounds.extAddrTls')}</span>}
+                style={{ marginBottom: 0, marginTop: 8, paddingLeft: 0 }}
+              >
+                <Switch checked={form.externalAddrTls} disabled={isTlsForced} onChange={(v) => { form.externalAddrTls = v; refresh(); }} />
+              </Form.Item>
+            )}
+          </>
+        ) : (
+          <>
+            <Input
+              value={form.externalAddr}
+              placeholder={t('pages.inbounds.extAddrEmptyPlaceholder')}
+              onChange={(e) => { form.externalAddr = e.target.value; refresh(); }}
+            />
+            {showTlsSwitch && (
+              <Form.Item
+                label={<span style={{ fontSize: 12, color: '#888' }}>{t('pages.inbounds.extAddrTls')}</span>}
+                style={{ marginBottom: 0, marginTop: 8, paddingLeft: 0 }}
+              >
+                <Switch checked={form.externalAddrTls} disabled={isTlsForced} onChange={(v) => { form.externalAddrTls = v; refresh(); }} />
+              </Form.Item>
+            )}
+          </>
+        )}
+      </Form.Item>
+      {canProxy && (
+        <Form.Item label={labelWithHelp(t('pages.inbounds.externalPort'), 'pages.inbounds.externalPortDesc')}>
+          <InputNumber
+            value={form.externalPort ?? undefined}
+            min={1}
+            max={65535}
+            onChange={(v) => { form.externalPort = v ? Number(v) : null; refresh(); }}
+          />
+        </Form.Item>
+      )}
+      <Form.Item label={labelWithHelp(t('pages.inbounds.totalFlow'), 'pages.inbounds.trafficDesc')}>
         <InputNumber
           value={totalGB}
           min={0}
@@ -974,7 +1136,7 @@ export default function InboundFormModal({
           }}
         />
       </Form.Item>
-      <Form.Item label={t('pages.inbounds.periodicTrafficResetTitle')}>
+      <Form.Item label={labelWithHelp(t('pages.inbounds.periodicTrafficResetTitle'), 'pages.inbounds.periodicTrafficResetDesc')}>
         <Select value={form.trafficReset} onChange={(v) => { form.trafficReset = v; refresh(); }}>
           {TRAFFIC_RESETS.map((r) => (
             <Select.Option key={r} value={r}>{t(`pages.inbounds.periodicTrafficReset.${r}`)}</Select.Option>
@@ -991,10 +1153,7 @@ export default function InboundFormModal({
   );
 
   const renderFallbacksCard = () => (
-    <Card size="small" className="mt-12" title={t('pages.inbounds.fallbacks.title') || 'Fallbacks'}>
-      <Paragraph type="secondary" style={{ marginBottom: 12 }}>
-        {t('pages.inbounds.fallbacks.help') || 'When a connection on this inbound does not match any client, route it to another inbound. Pick a child below and the routing fields (SNI / ALPN / path / xver) auto-fill from its transport — most setups need no further tweaking. Each child should listen on 127.0.0.1 with security=none.'}
-      </Paragraph>
+    <Card size="small" className="mt-12" title={labelWithHelp(t('pages.inbounds.fallbacks.title') || 'Fallbacks', 'pages.inbounds.fallbacks.help')}>
       {fallbacks.length === 0 && (
         <Empty description={t('pages.inbounds.fallbacks.empty') || 'No fallbacks yet'} styles={{ image: { height: 40 } }} style={{ margin: '8px 0 12px' }} />
       )}
@@ -1095,10 +1254,10 @@ export default function InboundFormModal({
     <>
       {isVlessLike && (
         <Form colon={false} labelCol={{ sm: { span: 8 } }} wrapperCol={{ sm: { span: 14 } }} className="mt-12">
-          <Form.Item label={t('pages.inbounds.decryption')}>
+          <Form.Item label={labelWithHelp(t('pages.inbounds.decryption'), 'pages.inbounds.decryptionDesc')}>
             <Input value={ib.settings.decryption} onChange={(e) => { ib.settings.decryption = e.target.value; refresh(); }} />
           </Form.Item>
-          <Form.Item label={t('pages.inbounds.encryption')}>
+          <Form.Item label={labelWithHelp(t('pages.inbounds.encryption'), 'pages.inbounds.encryptionDesc')}>
             <Input value={ib.settings.encryption} onChange={(e) => { ib.settings.encryption = e.target.value; refresh(); }} />
           </Form.Item>
           <Form.Item label=" ">
@@ -1122,7 +1281,7 @@ export default function InboundFormModal({
 
       {ib.protocol === Protocols.SHADOWSOCKS && (
         <Form colon={false} labelCol={{ sm: { span: 8 } }} wrapperCol={{ sm: { span: 14 } }} className="mt-12">
-          <Form.Item label="Encryption method">
+          <Form.Item label={labelWithHelp('Encryption method', 'pages.inbounds.ssMethodDesc')}>
             <Select value={ib.settings.method} onChange={(v) => { ib.settings.method = v; onSSMethodChange(); }}>
               {Object.entries(SSMethods).map(([k, m]) => (
                 <Select.Option key={k} value={m as string}>{k}</Select.Option>
@@ -1149,7 +1308,7 @@ export default function InboundFormModal({
 
       {(ib.protocol === Protocols.HTTP || ib.protocol === Protocols.MIXED) && (
         <Form colon={false} labelCol={{ sm: { span: 8 } }} wrapperCol={{ sm: { span: 14 } }} className="mt-12">
-          <Form.Item label="Accounts">
+          <Form.Item label={labelWithHelp('Accounts', 'pages.inbounds.accountsDesc')}>
             <Button size="small" onClick={() => {
               const Account = ib.protocol === Protocols.HTTP
                 ? (Inbound as any).HttpSettings.HttpAccount
@@ -1175,19 +1334,19 @@ export default function InboundFormModal({
             ))}
           </Form.Item>
           {ib.protocol === Protocols.HTTP && (
-            <Form.Item label="Allow transparent">
+            <Form.Item label={labelWithHelp('Allow transparent', 'pages.inbounds.allowTransparentDesc')}>
               <Switch checked={!!ib.settings.allowTransparent} onChange={(v) => { ib.settings.allowTransparent = v; refresh(); }} />
             </Form.Item>
           )}
           {ib.protocol === Protocols.MIXED && (
             <>
-              <Form.Item label="Auth">
+              <Form.Item label={labelWithHelp('Auth', 'pages.inbounds.socksAuthDesc')}>
                 <Select value={ib.settings.auth} onChange={(v) => { ib.settings.auth = v; refresh(); }}>
                   <Select.Option value="noauth">noauth</Select.Option>
                   <Select.Option value="password">password</Select.Option>
                 </Select>
               </Form.Item>
-              <Form.Item label="UDP">
+              <Form.Item label={labelWithHelp('UDP', 'pages.inbounds.udpDesc')}>
                 <Switch checked={!!ib.settings.udp} onChange={(v) => { ib.settings.udp = v; refresh(); }} />
               </Form.Item>
               {ib.settings.udp && (
@@ -1318,10 +1477,10 @@ export default function InboundFormModal({
             <Input value={ib.settings.secretKey}
               onChange={(e) => { ib.settings.secretKey = e.target.value; refresh(); }} />
           </Form.Item>
-          <Form.Item label="Public key">
+          <Form.Item label={labelWithHelp('Public key', 'pages.inbounds.wgPublicKeyDesc')}>
             <Input value={ib.settings.pubKey} disabled />
           </Form.Item>
-          <Form.Item label="MTU">
+          <Form.Item label={labelWithHelp('MTU', 'pages.inbounds.wgMtuDesc')}>
             <InputNumber value={ib.settings.mtu}
               onChange={(v) => { ib.settings.mtu = Number(v) || 0; refresh(); }} />
           </Form.Item>
@@ -1345,10 +1504,10 @@ export default function InboundFormModal({
               <Form.Item label={<>Secret key <SyncOutlined className="random-icon" onClick={() => regenWgKeypair(peer)} /></>}>
                 <Input value={peer.privateKey} onChange={(e) => { peer.privateKey = e.target.value; refresh(); }} />
               </Form.Item>
-              <Form.Item label="Public key">
+              <Form.Item label={labelWithHelp('Public key', 'pages.inbounds.wgPublicKeyDesc')}>
                 <Input value={peer.publicKey} onChange={(e) => { peer.publicKey = e.target.value; refresh(); }} />
               </Form.Item>
-              <Form.Item label="PSK">
+              <Form.Item label={labelWithHelp('PSK', 'pages.inbounds.wgPskDesc')}>
                 <Input value={peer.psk} onChange={(e) => { peer.psk = e.target.value; refresh(); }} />
               </Form.Item>
               <Form.Item label="Allowed IPs">
@@ -1385,7 +1544,7 @@ export default function InboundFormModal({
       <>
         <Form colon={false} labelCol={{ sm: { span: 8 } }} wrapperCol={{ sm: { span: 14 } }}>
           {ib.protocol !== Protocols.HYSTERIA && (
-            <Form.Item label="Transmission">
+            <Form.Item label={labelWithHelp(t('pages.inbounds.network'), 'pages.inbounds.networkDesc')}>
               <Select value={network} style={{ width: '75%' }} onChange={onNetworkChange}>
                 <Select.Option value="tcp">TCP (RAW)</Select.Option>
                 <Select.Option value="kcp">mKCP</Select.Option>
@@ -1400,12 +1559,12 @@ export default function InboundFormModal({
           {network === 'tcp' && (
             <>
               {canEnableTls && (
-                <Form.Item label="Proxy Protocol">
+                <Form.Item label={labelWithHelp('Proxy Protocol', 'pages.inbounds.proxyProtocolDesc')}>
                   <Switch checked={!!ib.stream.tcp.acceptProxyProtocol}
                     onChange={(v) => { ib.stream.tcp.acceptProxyProtocol = v; refresh(); }} />
                 </Form.Item>
               )}
-              <Form.Item label={`HTTP ${t('camouflage')}`}>
+              <Form.Item label={labelWithHelp(`HTTP ${t('camouflage')}`, 'pages.inbounds.tcpHttpDesc')}>
                 <Switch checked={ib.stream.tcp.type === 'http'}
                   onChange={(v) => { ib.stream.tcp.type = v ? 'http' : 'none'; refresh(); }} />
               </Form.Item>
@@ -1500,21 +1659,21 @@ export default function InboundFormModal({
 
           {network === 'kcp' && (
             <>
-              <Form.Item label="MTU"><InputNumber value={ib.stream.kcp.mtu} min={576} max={1460} onChange={(v) => { ib.stream.kcp.mtu = Number(v) || 0; refresh(); }} /></Form.Item>
-              <Form.Item label="TTI (ms)"><InputNumber value={ib.stream.kcp.tti} min={10} max={100} onChange={(v) => { ib.stream.kcp.tti = Number(v) || 0; refresh(); }} /></Form.Item>
-              <Form.Item label="Uplink (MB/s)"><InputNumber value={ib.stream.kcp.upCap} min={0} onChange={(v) => { ib.stream.kcp.upCap = Number(v) || 0; refresh(); }} /></Form.Item>
-              <Form.Item label="Downlink (MB/s)"><InputNumber value={ib.stream.kcp.downCap} min={0} onChange={(v) => { ib.stream.kcp.downCap = Number(v) || 0; refresh(); }} /></Form.Item>
-              <Form.Item label="CWND Multiplier"><InputNumber value={ib.stream.kcp.cwndMultiplier} min={1} onChange={(v) => { ib.stream.kcp.cwndMultiplier = Number(v) || 0; refresh(); }} /></Form.Item>
-              <Form.Item label="Max Sending Window"><InputNumber value={ib.stream.kcp.maxSendingWindow} min={0} onChange={(v) => { ib.stream.kcp.maxSendingWindow = Number(v) || 0; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('MTU', 'pages.inbounds.kcpMtuDesc')}><InputNumber value={ib.stream.kcp.mtu} min={576} max={1460} onChange={(v) => { ib.stream.kcp.mtu = Number(v) || 0; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('TTI (ms)', 'pages.inbounds.kcpTtiDesc')}><InputNumber value={ib.stream.kcp.tti} min={10} max={100} onChange={(v) => { ib.stream.kcp.tti = Number(v) || 0; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('Uplink (MB/s)', 'pages.inbounds.kcpSpeedDesc')}><InputNumber value={ib.stream.kcp.upCap} min={0} onChange={(v) => { ib.stream.kcp.upCap = Number(v) || 0; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('Downlink (MB/s)', 'pages.inbounds.kcpSpeedDesc')}><InputNumber value={ib.stream.kcp.downCap} min={0} onChange={(v) => { ib.stream.kcp.downCap = Number(v) || 0; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('CWND Multiplier', 'pages.inbounds.kcpCwndDesc')}><InputNumber value={ib.stream.kcp.cwndMultiplier} min={1} onChange={(v) => { ib.stream.kcp.cwndMultiplier = Number(v) || 0; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('Max Sending Window', 'pages.inbounds.kcpMaxSendDesc')}><InputNumber value={ib.stream.kcp.maxSendingWindow} min={0} onChange={(v) => { ib.stream.kcp.maxSendingWindow = Number(v) || 0; refresh(); }} /></Form.Item>
             </>
           )}
 
           {network === 'ws' && (
             <>
-              <Form.Item label="Proxy Protocol"><Switch checked={!!ib.stream.ws.acceptProxyProtocol} onChange={(v) => { ib.stream.ws.acceptProxyProtocol = v; refresh(); }} /></Form.Item>
-              <Form.Item label={t('host')}><Input value={ib.stream.ws.host} onChange={(e) => { ib.stream.ws.host = e.target.value; refresh(); }} /></Form.Item>
-              <Form.Item label={t('path')}><Input value={ib.stream.ws.path} onChange={(e) => { ib.stream.ws.path = e.target.value; refresh(); }} /></Form.Item>
-              <Form.Item label="Heartbeat Period"><InputNumber value={ib.stream.ws.heartbeatPeriod} min={0} onChange={(v) => { ib.stream.ws.heartbeatPeriod = Number(v) || 0; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('Proxy Protocol', 'pages.inbounds.proxyProtocolDesc')}><Switch checked={!!ib.stream.ws.acceptProxyProtocol} onChange={(v) => { ib.stream.ws.acceptProxyProtocol = v; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp(t('host'), 'pages.inbounds.wsHostDesc')}><Input value={ib.stream.ws.host} onChange={(e) => { ib.stream.ws.host = e.target.value; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp(t('path'), 'pages.inbounds.wsPathDesc')}><Input value={ib.stream.ws.path} onChange={(e) => { ib.stream.ws.path = e.target.value; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('Heartbeat Period', 'pages.inbounds.heartbeatDesc')}><InputNumber value={ib.stream.ws.heartbeatPeriod} min={0} onChange={(v) => { ib.stream.ws.heartbeatPeriod = Number(v) || 0; refresh(); }} /></Form.Item>
               <Form.Item label={t('pages.inbounds.stream.tcp.requestHeader')}>
                 <Button size="small" onClick={() => { ib.stream.ws.addHeader('', ''); refresh(); }}><PlusOutlined /></Button>
               </Form.Item>
@@ -1541,17 +1700,17 @@ export default function InboundFormModal({
 
           {network === 'grpc' && (
             <>
-              <Form.Item label="Service Name"><Input value={ib.stream.grpc.serviceName} onChange={(e) => { ib.stream.grpc.serviceName = e.target.value; refresh(); }} /></Form.Item>
-              <Form.Item label="Authority"><Input value={ib.stream.grpc.authority} onChange={(e) => { ib.stream.grpc.authority = e.target.value; refresh(); }} /></Form.Item>
-              <Form.Item label="Multi Mode"><Switch checked={!!ib.stream.grpc.multiMode} onChange={(v) => { ib.stream.grpc.multiMode = v; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('Service Name', 'pages.inbounds.grpcServiceNameDesc')}><Input value={ib.stream.grpc.serviceName} onChange={(e) => { ib.stream.grpc.serviceName = e.target.value; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('Authority', 'pages.inbounds.grpcAuthorityDesc')}><Input value={ib.stream.grpc.authority} onChange={(e) => { ib.stream.grpc.authority = e.target.value; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('Multi Mode', 'pages.inbounds.grpcMultiModeDesc')}><Switch checked={!!ib.stream.grpc.multiMode} onChange={(v) => { ib.stream.grpc.multiMode = v; refresh(); }} /></Form.Item>
             </>
           )}
 
           {network === 'httpupgrade' && (
             <>
-              <Form.Item label="Proxy Protocol"><Switch checked={!!ib.stream.httpupgrade.acceptProxyProtocol} onChange={(v) => { ib.stream.httpupgrade.acceptProxyProtocol = v; refresh(); }} /></Form.Item>
-              <Form.Item label={t('host')}><Input value={ib.stream.httpupgrade.host} onChange={(e) => { ib.stream.httpupgrade.host = e.target.value; refresh(); }} /></Form.Item>
-              <Form.Item label={t('path')}><Input value={ib.stream.httpupgrade.path} onChange={(e) => { ib.stream.httpupgrade.path = e.target.value; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('Proxy Protocol', 'pages.inbounds.proxyProtocolDesc')}><Switch checked={!!ib.stream.httpupgrade.acceptProxyProtocol} onChange={(v) => { ib.stream.httpupgrade.acceptProxyProtocol = v; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp(t('host'), 'pages.inbounds.wsHostDesc')}><Input value={ib.stream.httpupgrade.host} onChange={(e) => { ib.stream.httpupgrade.host = e.target.value; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp(t('path'), 'pages.inbounds.wsPathDesc')}><Input value={ib.stream.httpupgrade.path} onChange={(e) => { ib.stream.httpupgrade.path = e.target.value; refresh(); }} /></Form.Item>
               <Form.Item label={t('pages.inbounds.stream.tcp.requestHeader')}>
                 <Button size="small" onClick={() => { ib.stream.httpupgrade.addHeader('', ''); refresh(); }}><PlusOutlined /></Button>
               </Form.Item>
@@ -1578,8 +1737,8 @@ export default function InboundFormModal({
 
           {network === 'xhttp' && (
             <>
-              <Form.Item label={t('host')}><Input value={ib.stream.xhttp.host} onChange={(e) => { ib.stream.xhttp.host = e.target.value; refresh(); }} /></Form.Item>
-              <Form.Item label={t('path')}><Input value={ib.stream.xhttp.path} onChange={(e) => { ib.stream.xhttp.path = e.target.value; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp(t('host'), 'pages.inbounds.wsHostDesc')}><Input value={ib.stream.xhttp.host} onChange={(e) => { ib.stream.xhttp.host = e.target.value; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp(t('path'), 'pages.inbounds.wsPathDesc')}><Input value={ib.stream.xhttp.path} onChange={(e) => { ib.stream.xhttp.path = e.target.value; refresh(); }} /></Form.Item>
               <Form.Item label={t('pages.inbounds.stream.tcp.requestHeader')}>
                 <Button size="small" onClick={() => { ib.stream.xhttp.addHeader('', ''); refresh(); }}><PlusOutlined /></Button>
               </Form.Item>
@@ -1601,28 +1760,28 @@ export default function InboundFormModal({
                   ))}
                 </Form.Item>
               )}
-              <Form.Item label="Mode">
+              <Form.Item label={labelWithHelp('Mode', 'pages.inbounds.xhttpModeDesc')}>
                 <Select value={ib.stream.xhttp.mode} style={{ width: '50%' }} onChange={(v) => { ib.stream.xhttp.mode = v; refresh(); }}>
                   {MODE_OPTIONS.map((m) => <Select.Option key={m} value={m}>{m}</Select.Option>)}
                 </Select>
               </Form.Item>
               {ib.stream.xhttp.mode === 'packet-up' && (
                 <>
-                  <Form.Item label="Max Buffered Upload"><InputNumber value={ib.stream.xhttp.scMaxBufferedPosts} onChange={(v) => { ib.stream.xhttp.scMaxBufferedPosts = Number(v) || 0; refresh(); }} /></Form.Item>
-                  <Form.Item label="Max Upload Size (Byte)"><Input value={ib.stream.xhttp.scMaxEachPostBytes} onChange={(e) => { ib.stream.xhttp.scMaxEachPostBytes = e.target.value; refresh(); }} /></Form.Item>
+                  <Form.Item label={labelWithHelp('Max Buffered Upload', 'pages.inbounds.xhttpMaxBufferedUploadDesc')}><InputNumber value={ib.stream.xhttp.scMaxBufferedPosts} onChange={(v) => { ib.stream.xhttp.scMaxBufferedPosts = Number(v) || 0; refresh(); }} /></Form.Item>
+                  <Form.Item label={labelWithHelp('Max Upload Size (Byte)', 'pages.inbounds.xhttpMaxUploadDesc')}><Input value={ib.stream.xhttp.scMaxEachPostBytes} onChange={(e) => { ib.stream.xhttp.scMaxEachPostBytes = e.target.value; refresh(); }} /></Form.Item>
                 </>
               )}
               {ib.stream.xhttp.mode === 'stream-up' && (
-                <Form.Item label="Stream-Up Server"><Input value={ib.stream.xhttp.scStreamUpServerSecs} onChange={(e) => { ib.stream.xhttp.scStreamUpServerSecs = e.target.value; refresh(); }} /></Form.Item>
+                <Form.Item label={labelWithHelp('Stream-Up Server', 'pages.inbounds.xhttpStreamUpServerDesc')}><Input value={ib.stream.xhttp.scStreamUpServerSecs} onChange={(e) => { ib.stream.xhttp.scStreamUpServerSecs = e.target.value; refresh(); }} /></Form.Item>
               )}
-              <Form.Item label="Server Max Header Bytes"><InputNumber value={ib.stream.xhttp.serverMaxHeaderBytes} min={0} placeholder="0 (default)" onChange={(v) => { ib.stream.xhttp.serverMaxHeaderBytes = Number(v) || 0; refresh(); }} /></Form.Item>
-              <Form.Item label="Padding Bytes"><Input value={ib.stream.xhttp.xPaddingBytes} onChange={(e) => { ib.stream.xhttp.xPaddingBytes = e.target.value; refresh(); }} /></Form.Item>
-              <Form.Item label="Padding Obfs Mode"><Switch checked={!!ib.stream.xhttp.xPaddingObfsMode} onChange={(v) => { ib.stream.xhttp.xPaddingObfsMode = v; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('Server Max Header Bytes', 'pages.inbounds.xhttpServerMaxHeaderBytesDesc')}><InputNumber value={ib.stream.xhttp.serverMaxHeaderBytes} min={0} placeholder="0 (default)" onChange={(v) => { ib.stream.xhttp.serverMaxHeaderBytes = Number(v) || 0; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('Padding Bytes', 'pages.inbounds.xhttpPaddingDesc')}><Input value={ib.stream.xhttp.xPaddingBytes} onChange={(e) => { ib.stream.xhttp.xPaddingBytes = e.target.value; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('Padding Obfs Mode', 'pages.inbounds.xhttpPaddingObfsModeDesc')}><Switch checked={!!ib.stream.xhttp.xPaddingObfsMode} onChange={(v) => { ib.stream.xhttp.xPaddingObfsMode = v; refresh(); }} /></Form.Item>
               {ib.stream.xhttp.xPaddingObfsMode && (
                 <>
-                  <Form.Item label="Padding Key"><Input value={ib.stream.xhttp.xPaddingKey} placeholder="x_padding" onChange={(e) => { ib.stream.xhttp.xPaddingKey = e.target.value; refresh(); }} /></Form.Item>
-                  <Form.Item label="Padding Header"><Input value={ib.stream.xhttp.xPaddingHeader} placeholder="X-Padding" onChange={(e) => { ib.stream.xhttp.xPaddingHeader = e.target.value; refresh(); }} /></Form.Item>
-                  <Form.Item label="Padding Placement">
+                  <Form.Item label={labelWithHelp('Padding Key', 'pages.inbounds.xhttpPaddingKeyDesc')}><Input value={ib.stream.xhttp.xPaddingKey} placeholder="x_padding" onChange={(e) => { ib.stream.xhttp.xPaddingKey = e.target.value; refresh(); }} /></Form.Item>
+                  <Form.Item label={labelWithHelp('Padding Header', 'pages.inbounds.xhttpPaddingHeaderDesc')}><Input value={ib.stream.xhttp.xPaddingHeader} placeholder="X-Padding" onChange={(e) => { ib.stream.xhttp.xPaddingHeader = e.target.value; refresh(); }} /></Form.Item>
+                  <Form.Item label={labelWithHelp('Padding Placement', 'pages.inbounds.xhttpPaddingPlacementDesc')}>
                     <Select value={ib.stream.xhttp.xPaddingPlacement} onChange={(v) => { ib.stream.xhttp.xPaddingPlacement = v; refresh(); }}>
                       <Select.Option value="">Default (queryInHeader)</Select.Option>
                       <Select.Option value="queryInHeader">queryInHeader</Select.Option>
@@ -1631,7 +1790,7 @@ export default function InboundFormModal({
                       <Select.Option value="query">query</Select.Option>
                     </Select>
                   </Form.Item>
-                  <Form.Item label="Padding Method">
+                  <Form.Item label={labelWithHelp('Padding Method', 'pages.inbounds.xhttpPaddingMethodDesc')}>
                     <Select value={ib.stream.xhttp.xPaddingMethod} onChange={(v) => { ib.stream.xhttp.xPaddingMethod = v; refresh(); }}>
                       <Select.Option value="">Default (repeat-x)</Select.Option>
                       <Select.Option value="repeat-x">repeat-x</Select.Option>
@@ -1640,7 +1799,7 @@ export default function InboundFormModal({
                   </Form.Item>
                 </>
               )}
-              <Form.Item label="Session Placement">
+              <Form.Item label={labelWithHelp('Session Placement', 'pages.inbounds.xhttpSessionPlacementDesc')}>
                 <Select value={ib.stream.xhttp.sessionPlacement} onChange={(v) => { ib.stream.xhttp.sessionPlacement = v; refresh(); }}>
                   <Select.Option value="">Default (path)</Select.Option>
                   <Select.Option value="path">path</Select.Option>
@@ -1650,9 +1809,9 @@ export default function InboundFormModal({
                 </Select>
               </Form.Item>
               {ib.stream.xhttp.sessionPlacement && ib.stream.xhttp.sessionPlacement !== 'path' && (
-                <Form.Item label="Session Key"><Input value={ib.stream.xhttp.sessionKey} placeholder="x_session" onChange={(e) => { ib.stream.xhttp.sessionKey = e.target.value; refresh(); }} /></Form.Item>
+                <Form.Item label={labelWithHelp('Session Key', 'pages.inbounds.xhttpSessionKeyDesc')}><Input value={ib.stream.xhttp.sessionKey} placeholder="x_session" onChange={(e) => { ib.stream.xhttp.sessionKey = e.target.value; refresh(); }} /></Form.Item>
               )}
-              <Form.Item label="Sequence Placement">
+              <Form.Item label={labelWithHelp('Sequence Placement', 'pages.inbounds.xhttpSequencePlacementDesc')}>
                 <Select value={ib.stream.xhttp.seqPlacement} onChange={(v) => { ib.stream.xhttp.seqPlacement = v; refresh(); }}>
                   <Select.Option value="">Default (path)</Select.Option>
                   <Select.Option value="path">path</Select.Option>
@@ -1662,10 +1821,10 @@ export default function InboundFormModal({
                 </Select>
               </Form.Item>
               {ib.stream.xhttp.seqPlacement && ib.stream.xhttp.seqPlacement !== 'path' && (
-                <Form.Item label="Sequence Key"><Input value={ib.stream.xhttp.seqKey} placeholder="x_seq" onChange={(e) => { ib.stream.xhttp.seqKey = e.target.value; refresh(); }} /></Form.Item>
+                <Form.Item label={labelWithHelp('Sequence Key', 'pages.inbounds.xhttpSequenceKeyDesc')}><Input value={ib.stream.xhttp.seqKey} placeholder="x_seq" onChange={(e) => { ib.stream.xhttp.seqKey = e.target.value; refresh(); }} /></Form.Item>
               )}
               {ib.stream.xhttp.mode === 'packet-up' && (
-                <Form.Item label="Uplink Data Placement">
+                <Form.Item label={labelWithHelp('Uplink Data Placement', 'pages.inbounds.xhttpDataPlacementDesc')}>
                   <Select value={ib.stream.xhttp.uplinkDataPlacement} onChange={(v) => { ib.stream.xhttp.uplinkDataPlacement = v; refresh(); }}>
                     <Select.Option value="">Default (body)</Select.Option>
                     <Select.Option value="body">body</Select.Option>
@@ -1676,13 +1835,13 @@ export default function InboundFormModal({
                 </Form.Item>
               )}
               {ib.stream.xhttp.mode === 'packet-up' && ib.stream.xhttp.uplinkDataPlacement && ib.stream.xhttp.uplinkDataPlacement !== 'body' && (
-                <Form.Item label="Uplink Data Key"><Input value={ib.stream.xhttp.uplinkDataKey} placeholder="x_data" onChange={(e) => { ib.stream.xhttp.uplinkDataKey = e.target.value; refresh(); }} /></Form.Item>
+                <Form.Item label={labelWithHelp('Uplink Data Key', 'pages.inbounds.xhttpUplinkDataKeyDesc')}><Input value={ib.stream.xhttp.uplinkDataKey} placeholder="x_data" onChange={(e) => { ib.stream.xhttp.uplinkDataKey = e.target.value; refresh(); }} /></Form.Item>
               )}
-              <Form.Item label="No SSE Header"><Switch checked={!!ib.stream.xhttp.noSSEHeader} onChange={(v) => { ib.stream.xhttp.noSSEHeader = v; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('No SSE Header', 'pages.inbounds.xhttpNoSseHeaderDesc')}><Switch checked={!!ib.stream.xhttp.noSSEHeader} onChange={(v) => { ib.stream.xhttp.noSSEHeader = v; refresh(); }} /></Form.Item>
             </>
           )}
 
-          <Form.Item label="External Proxy">
+          <Form.Item label={labelWithHelp('External Proxy', 'pages.inbounds.externalProxyDesc')}>
             <Switch checked={externalProxyOn} onChange={setExternalProxy} />
             {externalProxyOn && (
               <Button size="small" type="primary" style={{ marginLeft: 10 }}
@@ -1718,40 +1877,42 @@ export default function InboundFormModal({
             </Form.Item>
           )}
 
-          <Form.Item label="Sockopt"><Switch checked={!!ib.stream.sockoptSwitch} onChange={(v) => { ib.stream.sockoptSwitch = v; refresh(); }} /></Form.Item>
+          <Form.Item label={labelWithHelp('Sockopt', 'pages.inbounds.sockoptDesc')}>
+            <Switch checked={!!ib.stream.sockoptSwitch} onChange={(v) => { ib.stream.sockoptSwitch = v; refresh(); }} />
+          </Form.Item>
           {ib.stream.sockoptSwitch && ib.stream.sockopt && (
             <>
-              <Form.Item label="Route Mark"><InputNumber value={ib.stream.sockopt.mark} min={0} onChange={(v) => { ib.stream.sockopt.mark = Number(v) || 0; refresh(); }} /></Form.Item>
-              <Form.Item label="TCP Keep Alive Interval"><InputNumber value={ib.stream.sockopt.tcpKeepAliveInterval} min={0} onChange={(v) => { ib.stream.sockopt.tcpKeepAliveInterval = Number(v) || 0; refresh(); }} /></Form.Item>
-              <Form.Item label="TCP Keep Alive Idle"><InputNumber value={ib.stream.sockopt.tcpKeepAliveIdle} min={0} onChange={(v) => { ib.stream.sockopt.tcpKeepAliveIdle = Number(v) || 0; refresh(); }} /></Form.Item>
-              <Form.Item label="TCP Max Seg"><InputNumber value={ib.stream.sockopt.tcpMaxSeg} min={0} onChange={(v) => { ib.stream.sockopt.tcpMaxSeg = Number(v) || 0; refresh(); }} /></Form.Item>
-              <Form.Item label="TCP User Timeout"><InputNumber value={ib.stream.sockopt.tcpUserTimeout} min={0} onChange={(v) => { ib.stream.sockopt.tcpUserTimeout = Number(v) || 0; refresh(); }} /></Form.Item>
-              <Form.Item label="TCP Window Clamp"><InputNumber value={ib.stream.sockopt.tcpWindowClamp} min={0} onChange={(v) => { ib.stream.sockopt.tcpWindowClamp = Number(v) || 0; refresh(); }} /></Form.Item>
-              <Form.Item label="Proxy Protocol"><Switch checked={!!ib.stream.sockopt.acceptProxyProtocol} onChange={(v) => { ib.stream.sockopt.acceptProxyProtocol = v; refresh(); }} /></Form.Item>
-              <Form.Item label="TCP Fast Open"><Switch checked={!!ib.stream.sockopt.tcpFastOpen} onChange={(v) => { ib.stream.sockopt.tcpFastOpen = v; refresh(); }} /></Form.Item>
-              <Form.Item label="Multipath TCP"><Switch checked={!!ib.stream.sockopt.tcpMptcp} onChange={(v) => { ib.stream.sockopt.tcpMptcp = v; refresh(); }} /></Form.Item>
-              <Form.Item label="Penetrate"><Switch checked={!!ib.stream.sockopt.penetrate} onChange={(v) => { ib.stream.sockopt.penetrate = v; refresh(); }} /></Form.Item>
-              <Form.Item label="V6 Only"><Switch checked={!!ib.stream.sockopt.V6Only} onChange={(v) => { ib.stream.sockopt.V6Only = v; refresh(); }} /></Form.Item>
-              <Form.Item label="Domain Strategy">
+              <Form.Item label={labelWithHelp('Route Mark', 'pages.inbounds.sockoptFwmarkDesc')}><InputNumber value={ib.stream.sockopt.mark} min={0} onChange={(v) => { ib.stream.sockopt.mark = Number(v) || 0; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('TCP Keep Alive Interval', 'pages.inbounds.sockoptKeepAliveIntervalDesc')}><InputNumber value={ib.stream.sockopt.tcpKeepAliveInterval} min={0} onChange={(v) => { ib.stream.sockopt.tcpKeepAliveInterval = Number(v) || 0; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('TCP Keep Alive Idle', 'pages.inbounds.sockoptKeepAliveIdleDesc')}><InputNumber value={ib.stream.sockopt.tcpKeepAliveIdle} min={0} onChange={(v) => { ib.stream.sockopt.tcpKeepAliveIdle = Number(v) || 0; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('TCP Max Seg', 'pages.inbounds.sockoptTcpMaxSegDesc')}><InputNumber value={ib.stream.sockopt.tcpMaxSeg} min={0} onChange={(v) => { ib.stream.sockopt.tcpMaxSeg = Number(v) || 0; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('TCP User Timeout', 'pages.inbounds.sockoptUserTimeoutDesc')}><InputNumber value={ib.stream.sockopt.tcpUserTimeout} min={0} onChange={(v) => { ib.stream.sockopt.tcpUserTimeout = Number(v) || 0; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('TCP Window Clamp', 'pages.inbounds.sockoptTcpWindowDesc')}><InputNumber value={ib.stream.sockopt.tcpWindowClamp} min={0} onChange={(v) => { ib.stream.sockopt.tcpWindowClamp = Number(v) || 0; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('Proxy Protocol', 'pages.inbounds.proxyProtocolDesc')}><Switch checked={!!ib.stream.sockopt.acceptProxyProtocol} onChange={(v) => { ib.stream.sockopt.acceptProxyProtocol = v; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('TCP Fast Open', 'pages.inbounds.sockoptTfoDesc')}><Switch checked={!!ib.stream.sockopt.tcpFastOpen} onChange={(v) => { ib.stream.sockopt.tcpFastOpen = v; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('Multipath TCP', 'pages.inbounds.sockoptMptcpDesc')}><Switch checked={!!ib.stream.sockopt.tcpMptcp} onChange={(v) => { ib.stream.sockopt.tcpMptcp = v; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('Penetrate', 'pages.inbounds.sockoptPenetrateDesc')}><Switch checked={!!ib.stream.sockopt.penetrate} onChange={(v) => { ib.stream.sockopt.penetrate = v; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('V6 Only', 'pages.inbounds.sockoptV6OnlyDesc')}><Switch checked={!!ib.stream.sockopt.V6Only} onChange={(v) => { ib.stream.sockopt.V6Only = v; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('Domain Strategy', 'pages.inbounds.sockoptDomainStrategyDesc')}>
                 <Select value={ib.stream.sockopt.domainStrategy} style={{ width: '50%' }} onChange={(v) => { ib.stream.sockopt.domainStrategy = v; refresh(); }}>
                   {DOMAIN_STRATEGIES.map((d) => <Select.Option key={d} value={d}>{d}</Select.Option>)}
                 </Select>
               </Form.Item>
-              <Form.Item label="TCP Congestion">
+              <Form.Item label={labelWithHelp('TCP Congestion', 'pages.inbounds.sockoptTcpCongestionDesc')}>
                 <Select value={ib.stream.sockopt.tcpcongestion} style={{ width: '50%' }} onChange={(v) => { ib.stream.sockopt.tcpcongestion = v; refresh(); }}>
                   {TCP_CONGESTIONS.map((c) => <Select.Option key={c} value={c}>{c}</Select.Option>)}
                 </Select>
               </Form.Item>
-              <Form.Item label="TProxy">
+              <Form.Item label={labelWithHelp('TProxy', 'pages.inbounds.sockoptTproxyDesc')}>
                 <Select value={ib.stream.sockopt.tproxy} style={{ width: '50%' }} onChange={(v) => { ib.stream.sockopt.tproxy = v; refresh(); }}>
                   <Select.Option value="off">Off</Select.Option>
                   <Select.Option value="redirect">Redirect</Select.Option>
                   <Select.Option value="tproxy">TProxy</Select.Option>
                 </Select>
               </Form.Item>
-              <Form.Item label="Dialer Proxy"><Input value={ib.stream.sockopt.dialerProxy} onChange={(e) => { ib.stream.sockopt.dialerProxy = e.target.value; refresh(); }} /></Form.Item>
-              <Form.Item label="Interface Name"><Input value={ib.stream.sockopt.interfaceName} onChange={(e) => { ib.stream.sockopt.interfaceName = e.target.value; refresh(); }} /></Form.Item>
-              <Form.Item label="Trusted X-Forwarded-For">
+              <Form.Item label={labelWithHelp('Dialer Proxy', 'pages.inbounds.sockoptDialerProxyDesc')}><Input value={ib.stream.sockopt.dialerProxy} onChange={(e) => { ib.stream.sockopt.dialerProxy = e.target.value; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('Interface Name', 'pages.inbounds.sockoptInterfaceDesc')}><Input value={ib.stream.sockopt.interfaceName} onChange={(e) => { ib.stream.sockopt.interfaceName = e.target.value; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('Trusted X-Forwarded-For', 'pages.inbounds.sockoptTrustedXFFDesc')}>
                 <Select mode="tags" value={ib.stream.sockopt.trustedXForwardedFor} style={{ width: '100%' }}
                   tokenSeparators={[',']}
                   onChange={(v) => { ib.stream.sockopt.trustedXForwardedFor = v; refresh(); }}>
@@ -1766,18 +1927,18 @@ export default function InboundFormModal({
 
           {ib.protocol === Protocols.HYSTERIA && (
             <>
-              <Form.Item label={<Tooltip title="Hysteria protocol version. Currently must be 2.">Version</Tooltip>}>
+              <Form.Item label={labelWithHelp('Version', 'pages.inbounds.hysteriaVersionDesc')}>
                 <InputNumber value={ib.stream.hysteria.version} min={2} max={2} onChange={(v) => { ib.stream.hysteria.version = Number(v) || 2; refresh(); }} />
               </Form.Item>
-              <Form.Item label={<Tooltip title="Idle timeout (seconds) for a single QUIC native UDP connection.">UDP idle timeout</Tooltip>}>
+              <Form.Item label={labelWithHelp('UDP idle timeout', 'pages.inbounds.hysteriaUdpIdleTimeoutDesc')}>
                 <InputNumber value={ib.stream.hysteria.udpIdleTimeout} min={0} onChange={(v) => { ib.stream.hysteria.udpIdleTimeout = Number(v) || 0; refresh(); }} />
               </Form.Item>
-              <Form.Item label="Masquerade">
+              <Form.Item label={labelWithHelp('Masquerade', 'pages.inbounds.masqueradeDesc')}>
                 <Switch checked={!!ib.stream.hysteria.masqueradeSwitch} onChange={(v) => { ib.stream.hysteria.masqueradeSwitch = v; refresh(); }} />
               </Form.Item>
               {ib.stream.hysteria.masqueradeSwitch && (
                 <>
-                  <Form.Item label="Type">
+                  <Form.Item label={labelWithHelp('Type', 'pages.inbounds.masqueradeTypeDesc')}>
                     <Select value={ib.stream.hysteria.masquerade.type} style={{ width: '50%' }} onChange={(v) => { ib.stream.hysteria.masquerade.type = v; refresh(); }}>
                       <Select.Option value="proxy">Proxy</Select.Option>
                       <Select.Option value="file">File</Select.Option>
@@ -1786,19 +1947,19 @@ export default function InboundFormModal({
                   </Form.Item>
                   {ib.stream.hysteria.masquerade.type === 'proxy' && (
                     <>
-                      <Form.Item label="URL"><Input value={ib.stream.hysteria.masquerade.url} placeholder="https://example.com" onChange={(e) => { ib.stream.hysteria.masquerade.url = e.target.value; refresh(); }} /></Form.Item>
-                      <Form.Item label="Rewrite Host"><Switch checked={!!ib.stream.hysteria.masquerade.rewriteHost} onChange={(v) => { ib.stream.hysteria.masquerade.rewriteHost = v; refresh(); }} /></Form.Item>
-                      <Form.Item label="Insecure"><Switch checked={!!ib.stream.hysteria.masquerade.insecure} onChange={(v) => { ib.stream.hysteria.masquerade.insecure = v; refresh(); }} /></Form.Item>
+                      <Form.Item label={labelWithHelp('URL', 'pages.inbounds.masqueradeUrlDesc')}><Input value={ib.stream.hysteria.masquerade.url} placeholder="https://example.com" onChange={(e) => { ib.stream.hysteria.masquerade.url = e.target.value; refresh(); }} /></Form.Item>
+                      <Form.Item label={labelWithHelp('Rewrite Host', 'pages.inbounds.masqueradeRewriteHostDesc')}><Switch checked={!!ib.stream.hysteria.masquerade.rewriteHost} onChange={(v) => { ib.stream.hysteria.masquerade.rewriteHost = v; refresh(); }} /></Form.Item>
+                      <Form.Item label={labelWithHelp('Insecure', 'pages.inbounds.masqueradeInsecureDesc')}><Switch checked={!!ib.stream.hysteria.masquerade.insecure} onChange={(v) => { ib.stream.hysteria.masquerade.insecure = v; refresh(); }} /></Form.Item>
                     </>
                   )}
                   {ib.stream.hysteria.masquerade.type === 'file' && (
-                    <Form.Item label="Directory"><Input value={ib.stream.hysteria.masquerade.dir} placeholder="/path/to/www" onChange={(e) => { ib.stream.hysteria.masquerade.dir = e.target.value; refresh(); }} /></Form.Item>
+                    <Form.Item label={labelWithHelp('Directory', 'pages.inbounds.masqueradeDirDesc')}><Input value={ib.stream.hysteria.masquerade.dir} placeholder="/path/to/www" onChange={(e) => { ib.stream.hysteria.masquerade.dir = e.target.value; refresh(); }} /></Form.Item>
                   )}
                   {ib.stream.hysteria.masquerade.type === 'string' && (
                     <>
-                      <Form.Item label="Content"><TextArea value={ib.stream.hysteria.masquerade.content} autoSize={{ minRows: 2, maxRows: 6 }} onChange={(e) => { ib.stream.hysteria.masquerade.content = e.target.value; refresh(); }} /></Form.Item>
-                      <Form.Item label="Status Code"><InputNumber value={ib.stream.hysteria.masquerade.statusCode} min={100} max={599} placeholder="200" onChange={(v) => { ib.stream.hysteria.masquerade.statusCode = Number(v) || 0; refresh(); }} /></Form.Item>
-                      <Form.Item label="Headers">
+                      <Form.Item label={labelWithHelp('Content', 'pages.inbounds.masqueradeContentDesc')}><TextArea value={ib.stream.hysteria.masquerade.content} autoSize={{ minRows: 2, maxRows: 6 }} onChange={(e) => { ib.stream.hysteria.masquerade.content = e.target.value; refresh(); }} /></Form.Item>
+                      <Form.Item label={labelWithHelp('Status Code', 'pages.inbounds.masqueradeStatusCodeDesc')}><InputNumber value={ib.stream.hysteria.masquerade.statusCode} min={100} max={599} placeholder="200" onChange={(v) => { ib.stream.hysteria.masquerade.statusCode = Number(v) || 0; refresh(); }} /></Form.Item>
+                      <Form.Item label={labelWithHelp('Headers', 'pages.inbounds.masqueradeHeadersDesc')}>
                         <Button size="small" onClick={() => { ib.stream.hysteria.masquerade.addHeader('', ''); refresh(); }}>
                           <PlusOutlined />
                         </Button>
@@ -1834,7 +1995,7 @@ export default function InboundFormModal({
 
   const renderSecurityTab = () => (
     <Form colon={false} labelCol={{ sm: { span: 8 } }} wrapperCol={{ sm: { span: 14 } }}>
-      <Form.Item label={t('pages.inbounds.securityTab')}>
+      <Form.Item label={labelWithHelp(t('pages.inbounds.securityTab'), 'pages.inbounds.TlsDesc')}>
         <Radio.Group value={ib.stream.security} buttonStyle="solid" disabled={!canEnableTls}
           onChange={(e) => setSecurity(e.target.value)}>
           <Radio.Button value="none">none</Radio.Button>
@@ -1845,14 +2006,16 @@ export default function InboundFormModal({
 
       {ib.stream.security === 'tls' && ib.stream.tls && (
         <>
-          <Form.Item label="SNI"><Input value={ib.stream.tls.sni} placeholder="Server Name Indication" onChange={(e) => { ib.stream.tls.sni = e.target.value; refresh(); }} /></Form.Item>
-          <Form.Item label="Cipher Suites">
+          <Form.Item label={labelWithHelp('SNI', 'pages.inbounds.sniDesc')}>
+            <Input value={ib.stream.tls.sni} placeholder="Server Name Indication" onChange={(e) => { ib.stream.tls.sni = e.target.value; refresh(); }} />
+          </Form.Item>
+          <Form.Item label={labelWithHelp('Cipher Suites', 'pages.inbounds.tlsCipherSuitesDesc')}>
             <Select value={ib.stream.tls.cipherSuites} onChange={(v) => { ib.stream.tls.cipherSuites = v; refresh(); }}>
               <Select.Option value="">Auto</Select.Option>
               {CIPHER_SUITES.map(([label, val]) => <Select.Option key={val} value={val}>{label}</Select.Option>)}
             </Select>
           </Form.Item>
-          <Form.Item label="Min/Max Version">
+          <Form.Item label={labelWithHelp('Min/Max Version', 'pages.inbounds.tlsMinVersionDesc')}>
             <Space.Compact block>
               <Select value={ib.stream.tls.minVersion} style={{ width: '50%' }} onChange={(v) => { ib.stream.tls.minVersion = v; refresh(); }}>
                 {TLS_VERSIONS.map((v) => <Select.Option key={v} value={v}>{v}</Select.Option>)}
@@ -1862,21 +2025,21 @@ export default function InboundFormModal({
               </Select>
             </Space.Compact>
           </Form.Item>
-          <Form.Item label="uTLS">
+          <Form.Item label={labelWithHelp('uTLS', 'pages.inbounds.utlsDesc')}>
             <Select value={ib.stream.tls.settings.fingerprint} style={{ width: '100%' }} onChange={(v) => { ib.stream.tls.settings.fingerprint = v; refresh(); }}>
               <Select.Option value="">None</Select.Option>
               {FINGERPRINTS.map((fp) => <Select.Option key={fp} value={fp}>{fp}</Select.Option>)}
             </Select>
           </Form.Item>
-          <Form.Item label="ALPN">
+          <Form.Item label={labelWithHelp('ALPN', 'pages.inbounds.alpnDesc')}>
             <Select mode="multiple" value={ib.stream.tls.alpn} style={{ width: '100%' }} tokenSeparators={[',']}
               onChange={(v) => { ib.stream.tls.alpn = v; refresh(); }}>
               {ALPNS.map((a) => <Select.Option key={a} value={a}>{a}</Select.Option>)}
             </Select>
           </Form.Item>
-          <Form.Item label="Reject Unknown SNI"><Switch checked={!!ib.stream.tls.rejectUnknownSni} onChange={(v) => { ib.stream.tls.rejectUnknownSni = v; refresh(); }} /></Form.Item>
-          <Form.Item label="Disable System Root"><Switch checked={!!ib.stream.tls.disableSystemRoot} onChange={(v) => { ib.stream.tls.disableSystemRoot = v; refresh(); }} /></Form.Item>
-          <Form.Item label="Session Resumption"><Switch checked={!!ib.stream.tls.enableSessionResumption} onChange={(v) => { ib.stream.tls.enableSessionResumption = v; refresh(); }} /></Form.Item>
+          <Form.Item label={labelWithHelp('Reject Unknown SNI', 'pages.inbounds.tlsRejectUnknownSniDesc')}><Switch checked={!!ib.stream.tls.rejectUnknownSni} onChange={(v) => { ib.stream.tls.rejectUnknownSni = v; refresh(); }} /></Form.Item>
+          <Form.Item label={labelWithHelp('Disable System Root', 'pages.inbounds.tlsDisableSystemRootDesc')}><Switch checked={!!ib.stream.tls.disableSystemRoot} onChange={(v) => { ib.stream.tls.disableSystemRoot = v; refresh(); }} /></Form.Item>
+          <Form.Item label={labelWithHelp('Session Resumption', 'pages.inbounds.tlsSessionResumptionDesc')}><Switch checked={!!ib.stream.tls.enableSessionResumption} onChange={(v) => { ib.stream.tls.enableSessionResumption = v; refresh(); }} /></Form.Item>
 
           {(ib.stream.tls.certs || []).map((cert: any, idx: number) => (
             <div key={`cert-${idx}`}>
@@ -1926,20 +2089,22 @@ export default function InboundFormModal({
                   </Form.Item>
                 </>
               )}
-              <Form.Item label="One Time Loading"><Switch checked={!!cert.oneTimeLoading} onChange={(v) => { cert.oneTimeLoading = v; refresh(); }} /></Form.Item>
-              <Form.Item label="Usage Option">
+              <Form.Item label={labelWithHelp('One Time Loading', 'pages.inbounds.tlsOneTimeLoadingDesc')}><Switch checked={!!cert.oneTimeLoading} onChange={(v) => { cert.oneTimeLoading = v; refresh(); }} /></Form.Item>
+              <Form.Item label={labelWithHelp('Usage Option', 'pages.inbounds.tlsUsageOptionDesc')}>
                 <Select value={cert.usage} style={{ width: '50%' }} onChange={(v) => { cert.usage = v; refresh(); }}>
                   {USAGES.map((u) => <Select.Option key={u} value={u}>{u}</Select.Option>)}
                 </Select>
               </Form.Item>
               {cert.usage === 'issue' && (
-                <Form.Item label="Build Chain"><Switch checked={!!cert.buildChain} onChange={(v) => { cert.buildChain = v; refresh(); }} /></Form.Item>
+                <Form.Item label={labelWithHelp('Build Chain', 'pages.inbounds.buildChainDesc')}><Switch checked={!!cert.buildChain} onChange={(v) => { cert.buildChain = v; refresh(); }} /></Form.Item>
               )}
             </div>
           ))}
 
-          <Form.Item label="ECH key"><Input value={ib.stream.tls.echServerKeys} onChange={(e) => { ib.stream.tls.echServerKeys = e.target.value; refresh(); }} /></Form.Item>
-          <Form.Item label="ECH config"><Input value={ib.stream.tls.settings.echConfigList} onChange={(e) => { ib.stream.tls.settings.echConfigList = e.target.value; refresh(); }} /></Form.Item>
+          <Form.Item label={labelWithHelp('ECH key', 'pages.inbounds.echDesc')}>
+            <Input value={ib.stream.tls.echServerKeys} onChange={(e) => { ib.stream.tls.echServerKeys = e.target.value; refresh(); }} />
+          </Form.Item>
+          <Form.Item label={labelWithHelp('ECH config', 'pages.inbounds.echConfigDesc')}><Input value={ib.stream.tls.settings.echConfigList} onChange={(e) => { ib.stream.tls.settings.echConfigList = e.target.value; refresh(); }} /></Form.Item>
           <Form.Item label=" ">
             <Space>
               <Button type="primary" loading={saving} onClick={getNewEchCert}>Get New ECH Cert</Button>
@@ -1951,9 +2116,9 @@ export default function InboundFormModal({
 
       {ib.stream.security === 'reality' && ib.stream.reality && (
         <>
-          <Form.Item label="Show"><Switch checked={!!ib.stream.reality.show} onChange={(v) => { ib.stream.reality.show = v; refresh(); }} /></Form.Item>
-          <Form.Item label="Xver"><InputNumber value={ib.stream.reality.xver} min={0} onChange={(v) => { ib.stream.reality.xver = Number(v) || 0; refresh(); }} /></Form.Item>
-          <Form.Item label="uTLS">
+          <Form.Item label={labelWithHelp('Show', 'pages.inbounds.realityShowDesc')}><Switch checked={!!ib.stream.reality.show} onChange={(v) => { ib.stream.reality.show = v; refresh(); }} /></Form.Item>
+          <Form.Item label={labelWithHelp('Xver', 'pages.inbounds.realityXverDesc')}><InputNumber value={ib.stream.reality.xver} min={0} onChange={(v) => { ib.stream.reality.xver = Number(v) || 0; refresh(); }} /></Form.Item>
+          <Form.Item label={labelWithHelp('uTLS', 'pages.inbounds.utlsDesc')}>
             <Select value={ib.stream.reality.settings.fingerprint} style={{ width: '100%' }} onChange={(v) => { ib.stream.reality.settings.fingerprint = v; refresh(); }}>
               {FINGERPRINTS.map((fp) => <Select.Option key={fp} value={fp}>{fp}</Select.Option>)}
             </Select>
@@ -1964,14 +2129,16 @@ export default function InboundFormModal({
           <Form.Item label={<>SNI <SyncOutlined className="random-icon" onClick={randomizeRealityTarget} /></>}>
             <Input value={ib.stream.reality.serverNames} onChange={(e) => { ib.stream.reality.serverNames = e.target.value; refresh(); }} />
           </Form.Item>
-          <Form.Item label="Max Time Diff (ms)"><InputNumber value={ib.stream.reality.maxTimediff} min={0} onChange={(v) => { ib.stream.reality.maxTimediff = Number(v) || 0; refresh(); }} /></Form.Item>
-          <Form.Item label="Min Client Ver"><Input value={ib.stream.reality.minClientVer} placeholder="25.9.11" onChange={(e) => { ib.stream.reality.minClientVer = e.target.value; refresh(); }} /></Form.Item>
-          <Form.Item label="Max Client Ver"><Input value={ib.stream.reality.maxClientVer} placeholder="25.9.11" onChange={(e) => { ib.stream.reality.maxClientVer = e.target.value; refresh(); }} /></Form.Item>
-          <Form.Item label={<>Short IDs <SyncOutlined className="random-icon" onClick={randomizeShortIds} /></>}>
+          <Form.Item label={labelWithHelp('Max Time Diff (ms)', 'pages.inbounds.realityMaxTimeDiffDesc')}><InputNumber value={ib.stream.reality.maxTimediff} min={0} onChange={(v) => { ib.stream.reality.maxTimediff = Number(v) || 0; refresh(); }} /></Form.Item>
+          <Form.Item label={labelWithHelp('Min Client Ver', 'pages.inbounds.realityMinClientVerDesc')}><Input value={ib.stream.reality.minClientVer} placeholder="25.9.11" onChange={(e) => { ib.stream.reality.minClientVer = e.target.value; refresh(); }} /></Form.Item>
+          <Form.Item label={labelWithHelp('Max Client Ver', 'pages.inbounds.realityMaxClientVerDesc')}><Input value={ib.stream.reality.maxClientVer} placeholder="25.9.11" onChange={(e) => { ib.stream.reality.maxClientVer = e.target.value; refresh(); }} /></Form.Item>
+          <Form.Item label={labelWithHelp(<>Short IDs <SyncOutlined className="random-icon" onClick={randomizeShortIds} /></>, 'pages.inbounds.realityShortIdDesc')}>
             <TextArea value={ib.stream.reality.shortIds} autoSize={{ minRows: 1, maxRows: 4 }} onChange={(e) => { ib.stream.reality.shortIds = e.target.value; refresh(); }} />
           </Form.Item>
-          <Form.Item label="SpiderX"><Input value={ib.stream.reality.settings.spiderX} onChange={(e) => { ib.stream.reality.settings.spiderX = e.target.value; refresh(); }} /></Form.Item>
-          <Form.Item label={t('pages.inbounds.publicKey')}>
+          <Form.Item label={labelWithHelp('SpiderX', 'pages.inbounds.realitySpiderXDesc')}>
+            <Input value={ib.stream.reality.settings.spiderX} onChange={(e) => { ib.stream.reality.settings.spiderX = e.target.value; refresh(); }} />
+          </Form.Item>
+          <Form.Item label={labelWithHelp(t('pages.inbounds.publicKey'), 'pages.inbounds.realityPubKeyDesc')}>
             <TextArea value={ib.stream.reality.settings.publicKey} autoSize={{ minRows: 1, maxRows: 4 }}
               onChange={(e) => { ib.stream.reality.settings.publicKey = e.target.value; refresh(); }} />
           </Form.Item>
@@ -1985,10 +2152,10 @@ export default function InboundFormModal({
               <Button danger onClick={clearRealityKeypair}>Clear</Button>
             </Space>
           </Form.Item>
-          <Form.Item label="mldsa65 Seed">
+          <Form.Item label={labelWithHelp('mldsa65 Seed', 'pages.inbounds.realityMldsa65Desc')}>
             <TextArea value={ib.stream.reality.mldsa65Seed} autoSize={{ minRows: 2, maxRows: 6 }} onChange={(e) => { ib.stream.reality.mldsa65Seed = e.target.value; refresh(); }} />
           </Form.Item>
-          <Form.Item label="mldsa65 Verify">
+          <Form.Item label={labelWithHelp('mldsa65 Verify', 'pages.inbounds.realityMldsa65Desc')}>
             <TextArea value={ib.stream.reality.settings.mldsa65Verify} autoSize={{ minRows: 2, maxRows: 6 }} onChange={(e) => { ib.stream.reality.settings.mldsa65Verify = e.target.value; refresh(); }} />
           </Form.Item>
           <Form.Item label=" ">
@@ -2004,11 +2171,14 @@ export default function InboundFormModal({
 
   const renderSniffingTab = () => (
     <Form colon={false} labelCol={{ sm: { span: 8 } }} wrapperCol={{ sm: { span: 14 } }}>
-      <Form.Item label={t('enable')}>
+      <Form.Item label={labelWithHelp(t('enable'), 'pages.inbounds.sniffingDesc')}>
         <Switch checked={!!ib.sniffing.enabled} onChange={(v) => { ib.sniffing.enabled = v; refresh(); }} />
       </Form.Item>
       {ib.sniffing.enabled && (
         <>
+          <Form.Item wrapperCol={{ sm: { span: 14, offset: 8 } }} style={{ marginBottom: 8 }}>
+            <span style={{ fontSize: 12, color: 'var(--app-text-tertiary)' }}>{t('pages.inbounds.sniffOverrideDesc')}</span>
+          </Form.Item>
           <Form.Item wrapperCol={{ span: 24 }}>
             <Checkbox.Group value={ib.sniffing.destOverride} onChange={(v) => { ib.sniffing.destOverride = v; refresh(); }}>
               {Object.entries(SNIFFING_OPTION).map(([key, value]) => (
@@ -2016,18 +2186,18 @@ export default function InboundFormModal({
               ))}
             </Checkbox.Group>
           </Form.Item>
-          <Form.Item label={t('pages.inbounds.sniffingMetadataOnly')}>
+          <Form.Item label={labelWithHelp(t('pages.inbounds.sniffingMetadataOnly'), 'pages.inbounds.sniffMetadataDesc')}>
             <Switch checked={!!ib.sniffing.metadataOnly} onChange={(v) => { ib.sniffing.metadataOnly = v; refresh(); }} />
           </Form.Item>
-          <Form.Item label={t('pages.inbounds.sniffingRouteOnly')}>
+          <Form.Item label={labelWithHelp(t('pages.inbounds.sniffingRouteOnly'), 'pages.inbounds.sniffingRouteOnlyDesc')}>
             <Switch checked={!!ib.sniffing.routeOnly} onChange={(v) => { ib.sniffing.routeOnly = v; refresh(); }} />
           </Form.Item>
-          <Form.Item label={t('pages.inbounds.sniffingIpsExcluded')}>
+          <Form.Item label={labelWithHelp(t('pages.inbounds.sniffingIpsExcluded'), 'pages.inbounds.sniffingIpsExcludedDesc')}>
             <Select mode="tags" value={ib.sniffing.ipsExcluded} tokenSeparators={[',']}
               placeholder="IP/CIDR/geoip:*/ext:*" style={{ width: '100%' }}
               onChange={(v) => { ib.sniffing.ipsExcluded = v; refresh(); }} />
           </Form.Item>
-          <Form.Item label={t('pages.inbounds.sniffingDomainsExcluded')}>
+          <Form.Item label={labelWithHelp(t('pages.inbounds.sniffingDomainsExcluded'), 'pages.inbounds.sniffingDomainsExcludedDesc')}>
             <Select mode="tags" value={ib.sniffing.domainsExcluded} tokenSeparators={[',']}
               placeholder="domain:*/ext:*" style={{ width: '100%' }}
               onChange={(v) => { ib.sniffing.domainsExcluded = v; refresh(); }} />

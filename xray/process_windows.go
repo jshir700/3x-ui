@@ -1,4 +1,4 @@
-//go:build windows
+﻿//go:build windows
 
 package xray
 
@@ -7,7 +7,7 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/mhsanaei/3x-ui/v3/logger"
+	"github.com/jshir700/3x-ui/v3/logger"
 	"golang.org/x/sys/windows"
 )
 

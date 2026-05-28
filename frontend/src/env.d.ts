@@ -15,6 +15,12 @@ interface SubPageData {
   subJsonUrl?: string;
   subClashUrl?: string;
   subTitle?: string;
+  subSupportUrl?: string;
+  subProfileUrl?: string;
+  announce?: string;
+  updateInterval?: string;
+  callCount?: number;
+  format?: string;
   links?: string[];
   datepicker?: 'gregorian' | 'jalalian';
   downloadByte?: string | number;

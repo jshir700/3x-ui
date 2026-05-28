@@ -67,6 +67,14 @@ interface ClientFormModalProps {
   onOpenChange: (open: boolean) => void;
 }
 
+interface SubscriptionOption {
+  id: number;
+  subId: string;
+  remark: string;
+  enable: boolean;
+  expiryTime: number;
+}
+
 interface FormState {
   email: string;
   subId: string;
@@ -84,6 +92,7 @@ interface FormState {
   comment: string;
   enable: boolean;
   inboundIds: number[];
+  subscriptionIds: number[];
 }
 
 function emptyForm(): FormState {
@@ -93,7 +102,7 @@ function emptyForm(): FormState {
     uuid: '',
     password: '',
     auth: '',
-    flow: '',
+    flow: TLS_FLOW_CONTROL.VISION,
     reverseTag: '',
     totalGB: 0,
     expiryDate: null,
@@ -104,6 +113,7 @@ function emptyForm(): FormState {
     comment: '',
     enable: true,
     inboundIds: [],
+    subscriptionIds: [],
   };
 }
 
@@ -137,6 +147,7 @@ export default function ClientFormModal({
   const [clientIps, setClientIps] = useState<string[]>([]);
   const [ipsLoading, setIpsLoading] = useState(false);
   const [ipsClearing, setIpsClearing] = useState(false);
+  const [allSubscriptions, setAllSubscriptions] = useState<SubscriptionOption[]>([]);
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -144,7 +155,13 @@ export default function ClientFormModal({
 
   useEffect(() => {
     if (!open) return;
-     
+
+    // Fetch subscriptions for the dropdown
+    (async () => {
+      const msg = await HttpUtil.get('/panel/api/subscription/list') as ApiMsg<SubscriptionOption[]>;
+      if (msg?.success && Array.isArray(msg.obj)) setAllSubscriptions(msg.obj);
+    })();
+
     if (isEdit && client) {
       const et = Number(client.expiryTime) || 0;
       const next: FormState = {
@@ -162,6 +179,7 @@ export default function ClientFormModal({
         comment: client.comment || '',
         enable: !!client.enable,
         inboundIds: Array.isArray(attachedIds) ? [...attachedIds] : [],
+        subscriptionIds: [],
       };
       if (et < 0) {
         next.delayedStart = true;
@@ -223,20 +241,58 @@ export default function ClientFormModal({
 
   useEffect(() => {
     if (!showReverseTag && form.reverseTag) {
-       
+
       update('reverseTag', '');
     }
   }, [showReverseTag, form.reverseTag]);
 
+  // When editing, load which subscriptions already include this client
+  useEffect(() => {
+    if (!open || !isEdit || !client?.email || allSubscriptions.length === 0) return;
+    // subscription list already fetched — find which ones include this email
+    // We need to query backend since we only have the subscription list without clientEmails
+    (async () => {
+      const msg = await HttpUtil.get(
+        `/panel/api/inbounds/checkClientSubscriptions?email=${encodeURIComponent(client.email)}`,
+      ) as ApiMsg<{ affected: { id: number }[]; toBeDeleted: { id: number }[] }>;
+      if (msg?.success && msg.obj) {
+        const ids = new Set<number>();
+        for (const s of (msg.obj.affected || [])) ids.add(s.id);
+        for (const s of (msg.obj.toBeDeleted || [])) ids.add(s.id);
+        update('subscriptionIds', [...ids]);
+      }
+    })();
+  }, [open, isEdit, client?.email, allSubscriptions.length]);
+
+  const NOW = useMemo(() => Date.now(), []);
   const inboundOptions = useMemo(
     () => (inbounds || [])
       .filter((ib) => MULTI_CLIENT_PROTOCOLS.has(ib.protocol || ''))
-      .map((ib) => ({
-        label: `${ib.remark || `#${ib.id}`} · ${ib.protocol}:${ib.port}`,
-        value: ib.id,
-        title: `${ib.remark || ''} (${ib.protocol}:${ib.port})`,
-      })),
-    [inbounds],
+      .map((ib) => {
+        let tag = '';
+        const used = Number(ib.up || 0) + Number(ib.down || 0);
+        if (!ib.enable) tag = t('disabled');
+        else if (ib.expiryTime && ib.expiryTime > 0 && NOW > ib.expiryTime) tag = t('expired');
+        else if (Number(ib.total || 0) > 0 && used >= Number(ib.total || 0)) tag = t('depleted');
+        const label = `${ib.remark || `#${ib.id}`} · ${ib.protocol}:${ib.port}${tag ? ` (${tag})` : ''}`;
+        return {
+          label,
+          value: ib.id,
+          title: `${ib.remark || ''} (${ib.protocol}:${ib.port})`,
+        };
+      }),
+    [inbounds, t, NOW],
+  );
+
+  const subscriptionOptions = useMemo(
+    () => (allSubscriptions || []).map((s) => {
+      let tag = '';
+      if (!s.enable) tag = t('disabled');
+      else if (s.expiryTime && s.expiryTime > 0 && NOW > s.expiryTime) tag = t('expired');
+      const label = `${s.remark || s.subId} (${s.subId})${tag ? ` (${tag})` : ''}`;
+      return { label, value: s.id };
+    }),
+    [allSubscriptions, t, NOW],
   );
 
   async function loadIps() {
@@ -306,6 +362,7 @@ export default function ClientFormModal({
         const next = new Set(form.inboundIds || []);
         const toAttach = [...next].filter((id) => !original.has(id));
         const toDetach = [...original].filter((id) => !next.has(id));
+        (clientPayload as Record<string, unknown>).subscriptionIds = form.subscriptionIds || [];
         msg = await save(clientPayload, {
           isEdit: true,
           email: client.email,
@@ -314,7 +371,7 @@ export default function ClientFormModal({
         });
       } else {
         msg = await save(
-          { client: clientPayload, inboundIds: form.inboundIds },
+          { client: clientPayload, inboundIds: form.inboundIds, subscriptionIds: form.subscriptionIds || [] },
           { isEdit: false },
         );
       }
@@ -489,6 +546,18 @@ export default function ClientFormModal({
             options={inboundOptions}
             showSearch
             placeholder={t('pages.clients.selectInbound')}
+            filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes(input.toLowerCase())}
+          />
+        </Form.Item>
+
+        <Form.Item label={t('subscription.title')}>
+          <Select
+            mode="multiple"
+            value={form.subscriptionIds}
+            onChange={(v) => update('subscriptionIds', v)}
+            options={subscriptionOptions}
+            showSearch
+            placeholder={t('clients.subSelectHint')}
             filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes(input.toLowerCase())}
           />
         </Form.Item>

@@ -30,6 +30,7 @@
   background: #fff;
   border-radius: 4px;
   line-height: 0;
+  color-scheme: only light;
 }
 
 .qr-panel-canvas .qr-code svg {

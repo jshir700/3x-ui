@@ -1,10 +1,10 @@
-package controller
+﻿package controller
 
 import (
 	"strconv"
 
-	"github.com/mhsanaei/3x-ui/v3/database/model"
-	"github.com/mhsanaei/3x-ui/v3/web/service"
+	"github.com/jshir700/3x-ui/v3/database/model"
+	"github.com/jshir700/3x-ui/v3/web/service"
 
 	"github.com/gin-gonic/gin"
 )

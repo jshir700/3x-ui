@@ -52,12 +52,19 @@ export class AllSetting {
   subShowInfo = true;
   subEmailInRemark = true;
   subURI = '';
+  subUriScheme = 'https';
+  subUriAddress = '';
+  subUriPort: number | undefined;
+  subUriPath = '/sub/';
   subJsonURI = '';
   subClashURI = '';
   subJsonFragment = '';
   subJsonNoises = '';
   subJsonMux = '';
   subJsonRules = '';
+
+  xrayAutoUpdate = true;
+  xrayUpdateCron = '0 30 2 * * *';
 
   timeLocation = 'Local';
 

@@ -1,4 +1,4 @@
-// Package logger provides logging functionality for the 3x-ui panel with
+﻿// Package logger provides logging functionality for the 3x-ui panel with
 // dual-backend logging (console/syslog and file) and buffered log storage for web UI.
 package logger
 
@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/config"
+	"github.com/jshir700/3x-ui/v3/config"
 	"github.com/op/go-logging"
 
 	"gopkg.in/natefinch/lumberjack.v2"

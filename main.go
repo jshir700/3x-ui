@@ -1,4 +1,4 @@
-// Package main is the entry point for the 3x-ui web panel application.
+﻿// Package main is the entry point for the 3x-ui web panel application.
 // It initializes the database, web server, and handles command-line operations for managing the panel.
 package main
 
@@ -11,15 +11,15 @@ import (
 	"syscall"
 	_ "unsafe"
 
-	"github.com/mhsanaei/3x-ui/v3/config"
-	"github.com/mhsanaei/3x-ui/v3/database"
-	"github.com/mhsanaei/3x-ui/v3/logger"
-	"github.com/mhsanaei/3x-ui/v3/sub"
-	"github.com/mhsanaei/3x-ui/v3/util/crypto"
-	"github.com/mhsanaei/3x-ui/v3/util/sys"
-	"github.com/mhsanaei/3x-ui/v3/web"
-	"github.com/mhsanaei/3x-ui/v3/web/global"
-	"github.com/mhsanaei/3x-ui/v3/web/service"
+	"github.com/jshir700/3x-ui/v3/config"
+	"github.com/jshir700/3x-ui/v3/database"
+	"github.com/jshir700/3x-ui/v3/logger"
+	"github.com/jshir700/3x-ui/v3/sub"
+	"github.com/jshir700/3x-ui/v3/util/crypto"
+	"github.com/jshir700/3x-ui/v3/util/sys"
+	"github.com/jshir700/3x-ui/v3/web"
+	"github.com/jshir700/3x-ui/v3/web/global"
+	"github.com/jshir700/3x-ui/v3/web/service"
 
 	"github.com/joho/godotenv"
 	"github.com/op/go-logging"

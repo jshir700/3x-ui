@@ -1,4 +1,4 @@
-package sub
+﻿package sub
 
 import (
 	"fmt"
@@ -8,10 +8,9 @@ import (
 	"github.com/goccy/go-json"
 	yaml "github.com/goccy/go-yaml"
 
-	"github.com/mhsanaei/3x-ui/v3/database/model"
-	"github.com/mhsanaei/3x-ui/v3/logger"
-	"github.com/mhsanaei/3x-ui/v3/web/service"
-	"github.com/mhsanaei/3x-ui/v3/xray"
+	"github.com/jshir700/3x-ui/v3/database/model"
+	"github.com/jshir700/3x-ui/v3/web/service"
+	"github.com/jshir700/3x-ui/v3/xray"
 )
 
 type SubClashService struct {
@@ -32,7 +31,7 @@ func NewSubClashService(subService *SubService) *SubClashService {
 func (s *SubClashService) GetClash(subId string, host string) (string, string, error) {
 	// Set per-request state so resolveInboundAddress sees the node map.
 	s.SubService.PrepareForRequest(host)
-	inbounds, err := s.SubService.getInboundsBySubId(subId)
+	inbounds, filteredEmails, _, _, sub, err := s.SubService.getInboundsBySubId(subId)
 	if err != nil || len(inbounds) == 0 {
 		return "", "", err
 	}
@@ -42,21 +41,10 @@ func (s *SubClashService) GetClash(subId string, host string) (string, string, e
 	var proxies []map[string]any
 
 	seenEmails := make(map[string]struct{})
-	for _, inbound := range inbounds {
-		clients, err := s.inboundService.GetClients(inbound)
-		if err != nil {
-			logger.Error("SubClashService - GetClients: Unable to get clients from inbound")
-		}
-		if clients == nil {
-			continue
-		}
-		s.SubService.projectThroughFallbackMaster(inbound)
-		for _, client := range clients {
-			if client.SubID == subId {
-				_, clientTraffics = s.SubService.appendUniqueTraffic(seenEmails, clientTraffics, inbound.ClientStats, client.Email)
-				proxies = append(proxies, s.getProxies(inbound, client, host)...)
-			}
-		}
+	pairs := s.SubService.getOrderedPairs(inbounds, filteredEmails, subId, sub)
+	for _, p := range pairs {
+		_, clientTraffics = s.SubService.appendUniqueTraffic(seenEmails, clientTraffics, p.inbound.ClientStats, p.client.Email)
+		proxies = append(proxies, s.getProxies(p.inbound, p.client, host)...)
 	}
 
 	if len(proxies) == 0 {

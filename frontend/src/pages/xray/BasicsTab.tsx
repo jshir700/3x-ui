@@ -4,6 +4,7 @@ import { Alert, Button, Collapse, Input, Modal, Select, Space, Switch } from 'an
 import { ExclamationCircleFilled, CloudOutlined, ApiOutlined } from '@ant-design/icons';
 
 import { OutboundDomainStrategies } from '@/models/outbound.js';
+import { cronToNatural } from '@/utils/cron-parser.js';
 import SettingListItem from '@/components/SettingListItem';
 import type { XraySettingsValue, SetTemplate } from '@/hooks/useXraySetting';
 import './BasicsTab.css';
@@ -18,6 +19,21 @@ interface BasicsTabProps {
   onShowWarp: () => void;
   onShowNord: () => void;
   onResetDefault: () => void;
+  xrayAutoUpdate: boolean;
+  xrayUpdateCron: string;
+  timeLocation: string;
+  onChangeXrayAutoUpdate: (v: boolean) => void;
+  onChangeXrayUpdateCron: (v: string) => void;
+}
+
+function tzLabel(tz: string) {
+  if (!tz || tz === 'Local') tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  try {
+    const offsetMin = new Date().toLocaleString('en-US', { timeZone: tz, timeZoneName: 'shortOffset' })
+      .match(/([+-]\d+)/)?.[1];
+    if (offsetMin) return `${tz.replace(/_/g, ' ')} (UTC${offsetMin})`;
+    return tz.replace(/_/g, ' ');
+  } catch { return tz.replace(/_/g, ' '); }
 }
 
 const ROUTING_DOMAIN_STRATEGIES = ['AsIs', 'IPIfNonMatch', 'IPOnDemand'];
@@ -149,6 +165,11 @@ export default function BasicsTab({
   onShowWarp,
   onShowNord,
   onResetDefault,
+  xrayAutoUpdate,
+  xrayUpdateCron,
+  timeLocation,
+  onChangeXrayAutoUpdate,
+  onChangeXrayUpdateCron,
 }: BasicsTabProps) {
   const { t } = useTranslation();
   const [modal, modalContextHolder] = Modal.useModal();
@@ -263,6 +284,41 @@ export default function BasicsTab({
       ),
     },
     {
+      key: 'update',
+      label: t('subXrayUpdates'),
+      children: (
+        <>
+          <SettingListItem
+            paddings="small"
+            title={t('subKeepUpdated')}
+            description={t('subAutoUpdateDesc')}
+            control={
+              <Switch checked={xrayAutoUpdate} onChange={onChangeXrayAutoUpdate} />
+            }
+          />
+
+          <SettingListItem
+            paddings="small"
+            title={t('subScheduledUpdate')}
+            description={`${t('subCronExpr')}: ${tzLabel(timeLocation)}`}
+            control={
+              <>
+                <Input
+                  value={xrayUpdateCron}
+                  disabled={!xrayAutoUpdate}
+                  placeholder="0 30 2 * * *"
+                  onChange={(e) => onChangeXrayUpdateCron(e.target.value)}
+                />
+                <div className="cron-hint">
+                  {xrayUpdateCron ? cronToNatural(xrayUpdateCron, t) : t('subCronFormatHint')}
+                </div>
+              </>
+            }
+          />
+        </>
+      ),
+    },
+    {
       key: '2',
       label: t('pages.xray.statistics'),
       children: (
@@ -271,7 +327,7 @@ export default function BasicsTab({
             ['statsInboundUplink', t('pages.xray.statsInboundUplink')],
             ['statsInboundDownlink', t('pages.xray.statsInboundDownlink')],
             ['statsOutboundUplink', t('pages.xray.statsOutboundUplink')],
-            ['statsOutboundDownlink', 'Outbound downlink stats'],
+            ['statsOutboundDownlink', t('pages.xray.statsOutboundDownlink')],
           ].map(([field, label]) => (
             <SettingListItem
               key={field}

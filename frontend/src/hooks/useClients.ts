@@ -15,6 +15,8 @@ export interface ClientTraffic {
 export interface ClientRecord {
   email: string;
   subId?: string;
+  subCount?: number;
+  disabledSubCount?: number;
   uuid?: string;
   password?: string;
   auth?: string;
@@ -38,6 +40,11 @@ export interface InboundOption {
   remark?: string;
   protocol?: string;
   port?: number;
+  enable?: boolean;
+  expiryTime?: number;
+  total?: number;
+  up?: number;
+  down?: number;
   tlsFlowCapable?: boolean;
 }
 

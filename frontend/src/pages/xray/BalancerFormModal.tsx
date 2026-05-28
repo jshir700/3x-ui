@@ -18,13 +18,6 @@ interface BalancerFormModalProps {
   onConfirm: (value: BalancerFormValue) => void;
 }
 
-const STRATEGIES = [
-  { value: 'random', label: 'Random' },
-  { value: 'roundRobin', label: 'Round robin' },
-  { value: 'leastLoad', label: 'Least load' },
-  { value: 'leastPing', label: 'Least ping' },
-];
-
 export default function BalancerFormModal({
   open,
   balancer,
@@ -56,6 +49,13 @@ export default function BalancerFormModal({
     }
   }, [open, balancer]);
 
+  const strategies = useMemo(() => [
+    { value: 'random', label: t('pages.xray.balancer.strategy.random') },
+    { value: 'roundRobin', label: t('pages.xray.balancer.strategy.roundRobin') },
+    { value: 'leastLoad', label: t('pages.xray.balancer.strategy.leastLoad') },
+    { value: 'leastPing', label: t('pages.xray.balancer.strategy.leastPing') },
+  ], [t]);
+
   const tagEmpty = !tag.trim();
   const duplicateTag = !!tag && otherTags.includes(tag.trim());
   const emptySelector = selector.length === 0;
@@ -67,13 +67,13 @@ export default function BalancerFormModal({
       ? 'warning'
       : 'success';
   const tagHelp = tagEmpty
-    ? 'Tag is required'
+    ? t('pages.xray.balancer.tagRequired')
     : duplicateTag
-      ? 'Tag already used by another balancer'
+      ? t('pages.xray.balancer.tagDuplicate')
       : '';
 
   const selectorValidateStatus: 'error' | 'success' = emptySelector ? 'error' : 'success';
-  const selectorHelp = emptySelector ? 'Pick at least one outbound' : '';
+  const selectorHelp = emptySelector ? t('pages.xray.balancer.selectorRequired') : '';
 
   function submit() {
     if (!isValid) return;
@@ -103,14 +103,14 @@ export default function BalancerFormModal({
       onCancel={onClose}
     >
       <Form colon={false} labelCol={{ md: { span: 8 } }} wrapperCol={{ md: { span: 14 } }}>
-        <Form.Item label="Tag" validateStatus={tagValidateStatus} help={tagHelp} hasFeedback>
-          <Input value={tag} onChange={(e) => setTag(e.target.value)} placeholder="unique balancer tag" />
+        <Form.Item label={t('pages.xray.balancer.tag')} validateStatus={tagValidateStatus} help={tagHelp} hasFeedback>
+          <Input value={tag} onChange={(e) => setTag(e.target.value)} placeholder={t('pages.xray.balancer.tagPlaceholder')} />
         </Form.Item>
-        <Form.Item label="Strategy">
-          <Select value={strategy} onChange={setStrategy} options={STRATEGIES} />
+        <Form.Item label={t('pages.xray.balancer.balancerStrategy')}>
+          <Select value={strategy} onChange={setStrategy} options={strategies} />
         </Form.Item>
         <Form.Item
-          label="Selector"
+          label={t('pages.xray.balancer.selector')}
           validateStatus={selectorValidateStatus}
           help={selectorHelp}
           hasFeedback
@@ -123,7 +123,7 @@ export default function BalancerFormModal({
             options={outboundTags.map((tg) => ({ value: tg, label: tg }))}
           />
         </Form.Item>
-        <Form.Item label="Fallback">
+        <Form.Item label={t('pages.xray.balancer.fallback')}>
           <Select value={fallbackTag} onChange={setFallbackTag} allowClear options={fallbackOptions} />
         </Form.Item>
       </Form>

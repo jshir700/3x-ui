@@ -1,9 +1,9 @@
-package xray
+﻿package xray
 
 import (
 	"testing"
 
-	"github.com/mhsanaei/3x-ui/v3/util/json_util"
+	"github.com/jshir700/3x-ui/v3/util/json_util"
 )
 
 func makeInbound() InboundConfig {

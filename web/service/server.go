@@ -1,4 +1,4 @@
-package service
+﻿package service
 
 import (
 	"archive/zip"
@@ -20,12 +20,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/config"
-	"github.com/mhsanaei/3x-ui/v3/database"
-	"github.com/mhsanaei/3x-ui/v3/logger"
-	"github.com/mhsanaei/3x-ui/v3/util/common"
-	"github.com/mhsanaei/3x-ui/v3/util/sys"
-	"github.com/mhsanaei/3x-ui/v3/xray"
+	"github.com/jshir700/3x-ui/v3/config"
+	"github.com/jshir700/3x-ui/v3/database"
+	"github.com/jshir700/3x-ui/v3/logger"
+	"github.com/jshir700/3x-ui/v3/util/common"
+	"github.com/jshir700/3x-ui/v3/util/sys"
+	"github.com/jshir700/3x-ui/v3/xray"
 
 	"github.com/google/uuid"
 	"github.com/shirou/gopsutil/v4/cpu"

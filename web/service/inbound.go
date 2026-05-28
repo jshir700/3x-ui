@@ -1,4 +1,4 @@
-// Package service provides business logic services for the 3x-ui web panel,
+﻿// Package service provides business logic services for the 3x-ui web panel,
 // including inbound/outbound management, user administration, settings, and Xray integration.
 package service
 
@@ -12,12 +12,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/mhsanaei/3x-ui/v3/database"
-	"github.com/mhsanaei/3x-ui/v3/database/model"
-	"github.com/mhsanaei/3x-ui/v3/logger"
-	"github.com/mhsanaei/3x-ui/v3/util/common"
-	"github.com/mhsanaei/3x-ui/v3/web/runtime"
-	"github.com/mhsanaei/3x-ui/v3/xray"
+	"github.com/jshir700/3x-ui/v3/database"
+	"github.com/jshir700/3x-ui/v3/database/model"
+	"github.com/jshir700/3x-ui/v3/logger"
+	"github.com/jshir700/3x-ui/v3/util/common"
+	"github.com/jshir700/3x-ui/v3/web/runtime"
+	"github.com/jshir700/3x-ui/v3/xray"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -245,6 +245,11 @@ type InboundOption struct {
 	Tag            string `json:"tag"`
 	Protocol       string `json:"protocol"`
 	Port           int    `json:"port"`
+	Enable         bool   `json:"enable"`
+	ExpiryTime     int64  `json:"expiryTime"`
+	Total          int64  `json:"total"`
+	Up             int64  `json:"up"`
+	Down           int64  `json:"down"`
 	TlsFlowCapable bool   `json:"tlsFlowCapable"`
 }
 
@@ -260,12 +265,17 @@ func (s *InboundService) GetInboundOptions(userId int) ([]InboundOption, error) 
 		Tag            string `gorm:"column:tag"`
 		Protocol       string `gorm:"column:protocol"`
 		Port           int    `gorm:"column:port"`
+		Enable         bool   `gorm:"column:enable"`
+		ExpiryTime     int64  `gorm:"column:expiry_time"`
+		Total          int64  `gorm:"column:total"`
+		Up             int64  `gorm:"column:up"`
+		Down           int64  `gorm:"column:down"`
 		StreamSettings string `gorm:"column:stream_settings"`
 	}
 	err := db.Table("inbounds").
-		Select("id, remark, tag, protocol, port, stream_settings").
+		Select("id, remark, tag, protocol, port, enable, expiry_time, total, up, down, stream_settings").
 		Where("user_id = ?", userId).
-		Order("id ASC").
+		Order("sort_order ASC, id ASC").
 		Scan(&rows).Error
 	if err != nil && err != gorm.ErrRecordNotFound {
 		return nil, err
@@ -278,6 +288,11 @@ func (s *InboundService) GetInboundOptions(userId int) ([]InboundOption, error) 
 			Tag:            r.Tag,
 			Protocol:       r.Protocol,
 			Port:           r.Port,
+			Enable:         r.Enable,
+			ExpiryTime:     r.ExpiryTime,
+			Total:          r.Total,
+			Up:             r.Up,
+			Down:           r.Down,
 			TlsFlowCapable: inboundCanEnableTlsFlow(r.Protocol, r.StreamSettings),
 		})
 	}
@@ -381,6 +396,64 @@ func (s *InboundService) ReorderInbounds(ids []int) error {
 	return tx.Commit().Error
 }
 
+// ReorderClients updates the sort_order of clients within an inbound's settings JSON
+// to match the given email order. emails that are not found are ignored.
+func (s *InboundService) ReorderClients(inboundId int, emails []string) error {
+	if len(emails) == 0 {
+		return nil
+	}
+	db := database.GetDB()
+	var inbound model.Inbound
+	if err := db.Where("id = ?", inboundId).First(&inbound).Error; err != nil {
+		return err
+	}
+
+	var settings map[string]any
+	if err := json.Unmarshal([]byte(inbound.Settings), &settings); err != nil {
+		return err
+	}
+
+	// Build email-to-index map
+	rank := make(map[string]int, len(emails))
+	for i, e := range emails {
+		rank[e] = i
+	}
+
+	updateClientsInSlice := func(key string) bool {
+		raw, ok := settings[key]
+		if !ok {
+			return false
+		}
+		arr, ok := raw.([]any)
+		if !ok {
+			return false
+		}
+		for i, v := range arr {
+			obj, ok := v.(map[string]any)
+			if !ok {
+				continue
+			}
+			email, _ := obj["email"].(string)
+			if idx, found := rank[email]; found {
+				obj["sortOrder"] = (idx + 1) * 10
+			}
+			arr[i] = obj
+		}
+		settings[key] = arr
+		return true
+	}
+
+	updateClientsInSlice("clients")
+	updateClientsInSlice("accounts")
+	updateClientsInSlice("peers")
+
+	updatedJSON, err := json.Marshal(settings)
+	if err != nil {
+		return err
+	}
+	return db.Model(&inbound).Update("settings", string(updatedJSON)).Error
+}
+
 func (s *InboundService) GetClients(inbound *model.Inbound) ([]model.Client, error) {
 	settings := map[string][]model.Client{}
 	json.Unmarshal([]byte(inbound.Settings), &settings)
@@ -398,6 +471,17 @@ func (s *InboundService) GetClients(inbound *model.Inbound) ([]model.Client, err
 			clients[i].ClientID = s.allocateClientId(clients)
 		}
 	}
+	// Sort by SortOrder ascending; clients with SortOrder=0 (unsorted) go last
+	sort.SliceStable(clients, func(i, j int) bool {
+		ai, aj := clients[i].SortOrder, clients[j].SortOrder
+		if ai == 0 {
+			ai = 999999999
+		}
+		if aj == 0 {
+			aj = 999999999
+		}
+		return ai < aj
+	})
 	return clients, nil
 }
 
@@ -510,6 +594,45 @@ func (s *InboundService) GetEmailForClientId(inbound *model.Inbound, clientId in
 		}
 	}
 	return fmt.Sprintf("id:%d", clientId)
+}
+
+// GetClientEmail finds a client's email by inbound ID and protocol-specific identifier.
+// clientId can be a UUID (vmess/vless), password (trojan), email (shadowsocks), or auth (hysteria).
+func (s *InboundService) GetClientEmail(inboundId int, clientId string) string {
+	if clientId == "" {
+		return ""
+	}
+	inbound, err := s.GetInbound(inboundId)
+	if err != nil {
+		return ""
+	}
+	var settings map[string]any
+	if err := json.Unmarshal([]byte(inbound.Settings), &settings); err != nil {
+		return ""
+	}
+	clients, ok := settings["clients"].([]any)
+	if !ok {
+		return ""
+	}
+	key := "id"
+	switch inbound.Protocol {
+	case "trojan":
+		key = "password"
+	case "shadowsocks":
+		key = "email"
+	case "hysteria", "hysteria2":
+		key = "auth"
+	}
+	for _, raw := range clients {
+		if c, ok := raw.(map[string]any); ok {
+			if id, ok := c[key].(string); ok && id == clientId {
+				if email, ok := c["email"].(string); ok && email != "" {
+					return email
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func (s *InboundService) getAllEmails() ([]string, error) {
@@ -820,6 +943,20 @@ func (s *InboundService) SetInboundEnable(id int, enable bool) (bool, error) {
 	}
 	if inbound.Enable == enable {
 		return false, nil
+	}
+
+	// When enabling, check for port conflict with other enabled inbounds.
+	// The inbound is still disabled in DB, so flip in memory first —
+	// otherwise checkPortConflict short-circuits on !inbound.Enable.
+	if enable {
+		inbound.Enable = true
+		conflict, err := s.checkPortConflict(inbound, id)
+		if err != nil {
+			return false, err
+		}
+		if conflict {
+			return false, s.portConflictErr(inbound.Port, id)
+		}
 	}
 
 	db := database.GetDB()

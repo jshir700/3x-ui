@@ -1,11 +1,11 @@
-// Package common provides common utility functions for error handling, formatting, and multi-error management.
+﻿// Package common provides common utility functions for error handling, formatting, and multi-error management.
 package common
 
 import (
 	"errors"
 	"fmt"
 
-	"github.com/mhsanaei/3x-ui/v3/logger"
+	"github.com/jshir700/3x-ui/v3/logger"
 )
 
 // NewErrorf creates a new error with formatted message.

@@ -241,13 +241,13 @@ export default function OutboundsTab({
                   items: [
                     ...(index > 0
                       ? [
-                          { key: 'top', label: <><VerticalAlignTopOutlined /> Move to top</>, onClick: () => setFirst(index) },
+                          { key: 'top', label: <><VerticalAlignTopOutlined /> {t('moveToTop')}</>, onClick: () => setFirst(index) },
                         ]
                       : []),
                     { key: 'up', label: <ArrowUpOutlined />, disabled: index === 0, onClick: () => moveUp(index) },
                     { key: 'down', label: <ArrowDownOutlined />, disabled: index === rows.length - 1, onClick: () => moveDown(index) },
-                    { key: 'reset', label: <><RetweetOutlined /> Reset traffic</>, onClick: () => onResetTraffic(rows[index].tag || '') },
-                    { key: 'del', danger: true, label: <><DeleteOutlined /> Delete</>, onClick: () => confirmDelete(index) },
+                    { key: 'reset', label: <><RetweetOutlined /> {t('pages.inbounds.resetTraffic')}</>, onClick: () => onResetTraffic(rows[index].tag || '') },
+                    { key: 'del', danger: true, label: <><DeleteOutlined /> {t('delete')}</>, onClick: () => confirmDelete(index) },
                   ],
                 }}
               >
@@ -258,7 +258,7 @@ export default function OutboundsTab({
         ),
       },
       {
-        title: 'Tag',
+        title: t('pages.xray.outbound.tag'),
         key: 'identity',
         align: 'left',
         render: (_v, record) => (
@@ -316,7 +316,7 @@ export default function OutboundsTab({
         },
       },
       {
-        title: 'Latency',
+        title: t('pages.inbounds.latency'),
         key: 'testResult',
         align: 'left',
         width: 140,
@@ -330,7 +330,7 @@ export default function OutboundsTab({
               content={
                 <div className="timing-breakdown">
                   <div className={`td-head ${r.success ? 'ok' : 'fail'}`}>
-                    {r.success ? <span>{r.delay} ms</span> : <span>{r.error || 'failed'}</span>}
+                    {r.success ? <span>{r.delay} ms</span> : <span>{r.error || t('fail')}</span>}
                     {r.mode && <span className="mode-badge">{String(r.mode).toUpperCase()}</span>}
                   </div>
                   {hasBreakdown(r) && (
@@ -344,7 +344,7 @@ export default function OutboundsTab({
                         <div key={ep.address} className="endpoint-row">
                           <span className={ep.success ? 'dot-ok' : 'dot-fail'}>●</span>
                           <span className="ep-addr">{ep.address}</span>
-                          <span className="ep-meta">{ep.success ? `${ep.delay} ms` : ep.error || 'failed'}</span>
+                          <span className="ep-meta">{ep.success ? `${ep.delay} ms` : ep.error || t('fail')}</span>
                         </div>
                       ))}
                     </>
@@ -354,7 +354,7 @@ export default function OutboundsTab({
             >
               <span className={r.success ? 'pill-ok' : 'pill-fail'}>
                 {r.success ? <CheckCircleFilled /> : <CloseCircleFilled />}
-                {r.success ? <span>{r.delay}&nbsp;ms</span> : <span>failed</span>}
+                {r.success ? <span>{r.delay}&nbsp;ms</span> : <span>{t('fail')}</span>}
               </span>
             </Popover>
           );
@@ -394,10 +394,10 @@ export default function OutboundsTab({
                 {!isMobile && t('pages.xray.Outbounds')}
               </Button>
               <Button type="primary" icon={<CloudOutlined />} onClick={onShowWarp}>
-                WARP
+                {t('pages.xray.warpRouting')}
               </Button>
               <Button type="primary" icon={<ApiOutlined />} onClick={onShowNord}>
-                NordVPN
+                {t('pages.xray.nordRouting')}
               </Button>
             </Space>
           </Col>
@@ -410,7 +410,7 @@ export default function OutboundsTab({
                 </Radio.Group>
               </Tooltip>
               <Button type="primary" loading={testingAll} icon={<PlayCircleOutlined />} onClick={() => onTestAll(testMode)}>
-                {!isMobile && 'Test all'}
+                {!isMobile && t('testAll')}
               </Button>
               <Popconfirm
                 placement="topRight"
@@ -478,7 +478,7 @@ export default function OutboundsTab({
                     {testResult(index) ? (
                       <span className={testResult(index)!.success ? 'pill-ok' : 'pill-fail'}>
                         {testResult(index)!.success ? <CheckCircleFilled /> : <CloseCircleFilled />}
-                        {testResult(index)!.success ? <span>{testResult(index)!.delay}&nbsp;ms</span> : <span>failed</span>}
+                        {testResult(index)!.success ? <span>{testResult(index)!.delay}&nbsp;ms</span> : <span>{t('fail')}</span>}
                       </span>
                     ) : isTesting(index) ? (
                       <LoadingOutlined />

@@ -9,6 +9,7 @@ import {
   CloseOutlined,
   DashboardOutlined,
   HeartOutlined,
+  LinkOutlined,
   LogoutOutlined,
   MenuOutlined,
   SettingOutlined,
@@ -29,12 +30,13 @@ interface AppSidebarProps {
   requestUri?: string;
 }
 
-type IconName = 'dashboard' | 'user' | 'team' | 'setting' | 'tool' | 'cluster' | 'logout' | 'apidocs';
+type IconName = 'dashboard' | 'user' | 'team' | 'link' | 'setting' | 'tool' | 'cluster' | 'logout' | 'apidocs';
 
 const iconByName: Record<IconName, ComponentType> = {
   dashboard: DashboardOutlined,
   user: UserOutlined,
   team: TeamOutlined,
+  link: LinkOutlined,
   setting: SettingOutlined,
   tool: ToolOutlined,
   cluster: ClusterOutlined,
@@ -115,6 +117,7 @@ export default function AppSidebar({ basePath = '', requestUri = '' }: AppSideba
     { key: `${prefix}panel/`, icon: 'dashboard', title: t('menu.dashboard') },
     { key: `${prefix}panel/inbounds`, icon: 'user', title: t('menu.inbounds') },
     { key: `${prefix}panel/clients`, icon: 'team', title: t('menu.clients') },
+    { key: `${prefix}panel/subscription`, icon: 'link', title: t('menu.subscription') },
     { key: `${prefix}panel/nodes`, icon: 'cluster', title: t('menu.nodes') },
     { key: `${prefix}panel/settings`, icon: 'setting', title: t('menu.settings') },
     { key: `${prefix}panel/xray`, icon: 'tool', title: t('menu.xray') },

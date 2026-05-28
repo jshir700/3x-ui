@@ -1,4 +1,4 @@
-// Package database provides database initialization, migration, and management utilities
+﻿// Package database provides database initialization, migration, and management utilities
 // for the 3x-ui panel using GORM with SQLite or PostgreSQL.
 package database
 
@@ -15,10 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/config"
-	"github.com/mhsanaei/3x-ui/v3/database/model"
-	"github.com/mhsanaei/3x-ui/v3/util/crypto"
-	"github.com/mhsanaei/3x-ui/v3/xray"
+	"github.com/jshir700/3x-ui/v3/config"
+	"github.com/jshir700/3x-ui/v3/database/model"
+	"github.com/jshir700/3x-ui/v3/util/crypto"
+	"github.com/jshir700/3x-ui/v3/xray"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
@@ -81,6 +81,15 @@ func initModels() error {
 			return err
 		}
 	}
+
+	// Migrate: rename inbound_ids to client_emails on subscriptions table
+	migrator := db.Migrator()
+	if migrator.HasColumn(&model.Subscription{}, "inbound_ids") {
+		if err := migrator.RenameColumn(&model.Subscription{}, "inbound_ids", "client_emails"); err != nil {
+			log.Printf("Error renaming column inbound_ids to client_emails: %v", err)
+		}
+	}
+
 	return nil
 }
 

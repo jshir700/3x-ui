@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { message as antMessage } from 'ant-design-vue';
+import { message as antMessage } from 'antd';
 // NOTE: do NOT statically import from @/i18n here — it creates a circular
 // dependency with @/i18n → @/utils.  Use dynamic import inside _handleMsg().
 
@@ -15,7 +15,7 @@ export class HttpUtil {
     static tCache = null;
     static async _ensureT() {
         if (!HttpUtil.tCache) {
-            try { const { t } = await import('@/i18n'); HttpUtil.tCache = t; } catch { HttpUtil.tCache = (k) => k; }
+            try { const { t } = await import('@/i18n/react'); HttpUtil.tCache = t; } catch { HttpUtil.tCache = (k) => k; }
         }
     }
     static async _handleMsg(msg) {
@@ -551,8 +551,18 @@ export class Wireguard {
 }
 
 export class ClipboardManager {
-    static copyText(content = "") {
-        // !! here old way of copying is used because not everyone can afford https connection
+    static async copyText(content = "") {
+        // prefer modern Async Clipboard API when available
+        if (navigator.clipboard?.writeText) {
+            try {
+                await navigator.clipboard.writeText(content);
+                return true;
+            } catch {
+                // fall through to execCommand fallback
+            }
+        }
+
+        // fallback for HTTP origins or when clipboard API is unavailable
         return new Promise((resolve) => {
             try {
                 const textarea = window.document.createElement('textarea');
@@ -570,15 +580,15 @@ export class ClipboardManager {
                 window.document.body.appendChild(textarea);
 
                 textarea.select();
-                window.document.execCommand("copy");
+                const ok = window.document.execCommand("copy");
 
                 window.document.body.removeChild(textarea);
 
-                resolve(true)
+                resolve(ok);
             } catch {
-                resolve(false)
+                resolve(false);
             }
-        })
+        });
     }
 }
 
@@ -912,6 +922,109 @@ export class FileManager {
 
         link.remove();
     }
+}
+
+// ---------------------------------------------------------------------------
+// Port-conflict detection (client-side mirror of backend checkPortConflict)
+// ---------------------------------------------------------------------------
+
+function isAnyListen(s) {
+  return !s || s === '0.0.0.0' || s === '::' || s === '::0';
+}
+
+function listenOverlaps(a, b) {
+  return isAnyListen(a) || isAnyListen(b) || a === b;
+}
+
+function inboundTransports(protocol, streamSettings, settings) {
+  // Hysteria / Hysteria2 / WireGuard → UDP only
+  if (protocol === 'hysteria' || protocol === 'hysteria2' || protocol === 'wireguard') {
+    return { tcp: false, udp: true };
+  }
+
+  const bits = { tcp: false, udp: false };
+
+  // Check streamSettings.network for UDP transports (kcp)
+  let network = '';
+  try {
+    const ss = typeof streamSettings === 'string' ? JSON.parse(streamSettings) : (streamSettings || {});
+    network = (ss.network || '').toLowerCase();
+  } catch (_e) { /* ignore */ }
+
+  if (network === 'kcp') {
+    bits.udp = true;
+  } else {
+    bits.tcp = true;
+  }
+
+  // Protocol-specific settings
+  try {
+    const st = typeof settings === 'string' ? JSON.parse(settings) : (settings || {});
+    switch (protocol) {
+      case 'shadowsocks': {
+        const n = st.network;
+        if (typeof n === 'string' && n) {
+          bits.tcp = false;
+          bits.udp = false;
+          if (n.includes('tcp')) bits.tcp = true;
+          if (n.includes('udp')) bits.udp = true;
+        }
+        break;
+      }
+      case 'mixed':
+        if (st.udp === true) bits.udp = true;
+        break;
+    }
+  } catch (_e) { /* ignore */ }
+
+  // Safety net: never return zero bits
+  if (!bits.tcp && !bits.udp) bits.tcp = true;
+  return bits;
+}
+
+function sameNode(a, b) {
+  const idA = a ?? null;
+  const idB = b ?? null;
+  return idA === idB;
+}
+
+/**
+ * Check if a disabled inbound would conflict with any enabled inbound.
+ * Returns { hasConflict: boolean, conflictIds: number[], conflictNames: string[] }
+ */
+export function checkInboundPortConflict(dbInbound, allInbounds) {
+  if (dbInbound.enable) return { hasConflict: false, conflictIds: [], conflictNames: [] };
+
+  const newBits = inboundTransports(
+    dbInbound.protocol,
+    dbInbound.streamSettings || dbInbound.stream_settings,
+    dbInbound.settings,
+  );
+
+  const conflictIds = [];
+  const conflictNames = [];
+
+  for (const other of allInbounds) {
+    if (other.id === dbInbound.id) continue;
+    if (!other.enable) continue;
+    if (other.port !== dbInbound.port) continue;
+    if (!sameNode(other.nodeId ?? other.node_id, dbInbound.nodeId ?? dbInbound.node_id)) continue;
+    if (!listenOverlaps(other.listen, dbInbound.listen)) continue;
+
+    const otherBits = inboundTransports(
+      other.protocol,
+      other.streamSettings || other.stream_settings,
+      other.settings,
+    );
+
+    const conflicts = (newBits.tcp && otherBits.tcp) || (newBits.udp && otherBits.udp);
+    if (conflicts) {
+      conflictIds.push(other.id);
+      conflictNames.push(other.remark || `#${other.id}`);
+    }
+  }
+
+  return { hasConflict: conflictIds.length > 0, conflictIds, conflictNames };
 }
 
 export class IntlUtil {

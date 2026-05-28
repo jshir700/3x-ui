@@ -1,9 +1,9 @@
-package xray
+﻿package xray
 
 import (
 	"bytes"
 
-	"github.com/mhsanaei/3x-ui/v3/util/json_util"
+	"github.com/jshir700/3x-ui/v3/util/json_util"
 )
 
 // InboundConfig represents an Xray inbound configuration.

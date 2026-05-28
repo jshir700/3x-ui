@@ -1,13 +1,13 @@
-package service
+﻿package service
 
 import (
 	"errors"
 
-	"github.com/mhsanaei/3x-ui/v3/database"
-	"github.com/mhsanaei/3x-ui/v3/database/model"
-	"github.com/mhsanaei/3x-ui/v3/logger"
-	"github.com/mhsanaei/3x-ui/v3/util/crypto"
-	ldaputil "github.com/mhsanaei/3x-ui/v3/util/ldap"
+	"github.com/jshir700/3x-ui/v3/database"
+	"github.com/jshir700/3x-ui/v3/database/model"
+	"github.com/jshir700/3x-ui/v3/logger"
+	"github.com/jshir700/3x-ui/v3/util/crypto"
+	ldaputil "github.com/jshir700/3x-ui/v3/util/ldap"
 	"github.com/xlzd/gotp"
 	"gorm.io/gorm"
 )

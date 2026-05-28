@@ -1,14 +1,14 @@
-package controller
+﻿package controller
 
 import (
 	"net/http"
 	"text/template"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/logger"
-	"github.com/mhsanaei/3x-ui/v3/web/middleware"
-	"github.com/mhsanaei/3x-ui/v3/web/service"
-	"github.com/mhsanaei/3x-ui/v3/web/session"
+	"github.com/jshir700/3x-ui/v3/logger"
+	"github.com/jshir700/3x-ui/v3/web/middleware"
+	"github.com/jshir700/3x-ui/v3/web/service"
+	"github.com/jshir700/3x-ui/v3/web/session"
 
 	"github.com/gin-gonic/gin"
 )

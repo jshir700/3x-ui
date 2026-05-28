@@ -284,11 +284,11 @@ const tzList = computed(() => {
 
       <!-- === Tabs below only shown in edit mode === -->
       <template v-if="isEdit">
-        <a-tab-pane key="panel" tab="面板设置">
-          <div v-if="remoteSettingsLoading" class="loading-text">正在从远程节点加载设置…</div>
+        <a-tab-pane key="panel" :tab="t('pages.nodes.tabPanel')">
+          <div v-if="remoteSettingsLoading" class="loading-text">{{ t('pages.nodes.loadingRemoteSettings') }}</div>
           <div v-else-if="remoteSettingsError" class="error-text">{{ remoteSettingsError }}</div>
           <a-form v-else layout="vertical">
-            <a-form-item label="语言">
+            <a-form-item :label="t('pages.nodes.remoteLang')">
               <a-select v-model:value="remoteSettings.tgLang" :style="{ width: '100%' }">
                 <a-select-option v-for="l in LanguageManager.supportedLanguages" :key="l.value" :value="l.value">
                   <span role="img" :aria-label="l.name">{{ l.icon }}</span>
@@ -297,7 +297,7 @@ const tzList = computed(() => {
               </a-select>
             </a-form-item>
 
-            <a-form-item label="时区">
+            <a-form-item :label="t('pages.nodes.remoteTimezone')">
               <a-select v-model:value="remoteSettings.timeLocation" show-search
                 :filter-option="(input, option) => option.value.toLowerCase().includes(input.toLowerCase())"
                 :style="{ width: '100%' }">
@@ -309,20 +309,20 @@ const tzList = computed(() => {
           </a-form>
         </a-tab-pane>
 
-        <a-tab-pane key="xray" tab="Xray设置">
-          <div v-if="remoteSettingsLoading" class="loading-text">正在从远程节点加载设置…</div>
+        <a-tab-pane key="xray" :tab="t('pages.nodes.tabXray')">
+          <div v-if="remoteSettingsLoading" class="loading-text">{{ t('pages.nodes.loadingRemoteSettings') }}</div>
           <div v-else-if="remoteSettingsError" class="error-text">{{ remoteSettingsError }}</div>
           <a-form v-else layout="vertical">
-            <a-form-item label="保持最新版本">
+            <a-form-item :label="t('pages.nodes.remoteXrayAutoUpdate')">
               <a-switch v-model:checked="remoteSettings.xrayAutoUpdate" />
-              <div class="hint">自动检测并更新 Xray 到最新版本</div>
+              <div class="hint">{{ t('pages.nodes.remoteXrayAutoUpdateHint') }}</div>
             </a-form-item>
 
-            <a-form-item label="定时更新时间">
+            <a-form-item :label="t('pages.nodes.remoteXrayUpdateCron')">
               <a-input v-model:value="remoteSettings.xrayUpdateCron"
                 :disabled="!remoteSettings?.xrayAutoUpdate"
                 placeholder="0 30 2 * * *" />
-              <div class="hint">Cron 表达式，时区: {{ remoteSettings?.timeLocation || 'Local' }}</div>
+              <div class="hint">{{ t('pages.nodes.remoteCronHint', { tz: remoteSettings?.timeLocation || 'Local' }) }}</div>
               <div v-if="remoteSettings?.xrayAutoUpdate && cronDescription" class="cron-hint">
                 {{ cronDescription }}
               </div>
@@ -330,24 +330,24 @@ const tzList = computed(() => {
           </a-form>
         </a-tab-pane>
 
-        <a-tab-pane key="telegram" tab="Telegram机器人配置">
-          <div v-if="remoteSettingsLoading" class="loading-text">正在从远程节点加载设置…</div>
+        <a-tab-pane key="telegram" :tab="t('pages.nodes.tabTelegram')">
+          <div v-if="remoteSettingsLoading" class="loading-text">{{ t('pages.nodes.loadingRemoteSettings') }}</div>
           <div v-else-if="remoteSettingsError" class="error-text">{{ remoteSettingsError }}</div>
           <a-form v-else layout="vertical">
-            <a-form-item label="启用Telegram机器人">
+            <a-form-item :label="t('pages.nodes.remoteTgEnable')">
               <a-switch v-model:checked="remoteSettings.tgBotEnable" />
             </a-form-item>
 
-            <a-form-item label="Telegram 机器人令牌">
+            <a-form-item :label="t('pages.nodes.remoteTgToken')">
               <a-input-password v-model:value="remoteSettings.tgBotToken"
-                :placeholder="remoteSettings.hasTgBotToken ? '已配置 - 输入新值替换' : ''" />
+                :placeholder="remoteSettings.hasTgBotToken ? t('pages.nodes.remoteTgTokenConfigured') : ''" />
             </a-form-item>
 
-            <a-form-item label="管理员聊天 ID">
+            <a-form-item :label="t('pages.nodes.remoteTgChatId')">
               <a-input v-model:value="remoteSettings.tgBotChatId" />
             </a-form-item>
 
-            <a-form-item label="Telegram 机器人语言">
+            <a-form-item :label="t('pages.nodes.remoteTgLang')">
               <a-select v-model:value="remoteSettings.tgLang" :style="{ width: '100%' }">
                 <a-select-option v-for="l in LanguageManager.supportedLanguages" :key="l.value" :value="l.value">
                   <span role="img" :aria-label="l.name">{{ l.icon }}</span>
@@ -356,22 +356,22 @@ const tzList = computed(() => {
               </a-select>
             </a-form-item>
 
-            <a-form-item label="通知时间">
+            <a-form-item :label="t('pages.nodes.remoteTgRunTime')">
               <a-input v-model:value="remoteSettings.tgRunTime" placeholder="@daily" />
-              <div class="hint">Cron 表达式，例如 @daily、0 30 2 * * *</div>
+              <div class="hint">{{ t('pages.nodes.remoteTgRunTimeHint') }}</div>
             </a-form-item>
 
-            <a-form-item label="数据库备份">
+            <a-form-item :label="t('pages.nodes.remoteTgBackup')">
               <a-switch v-model:checked="remoteSettings.tgBotBackup" />
             </a-form-item>
 
-            <a-form-item label="登录通知">
+            <a-form-item :label="t('pages.nodes.remoteTgLoginNotify')">
               <a-switch v-model:checked="remoteSettings.tgBotLoginNotify" />
             </a-form-item>
 
-            <a-form-item label="CPU 负载通知阈值">
+            <a-form-item :label="t('pages.nodes.remoteTgCpu')">
               <a-input-number v-model:value="remoteSettings.tgCpu" :min="0" :max="100" :style="{ width: '100%' }" />
-              <div class="hint">百分比，超过此值时发送通知</div>
+              <div class="hint">{{ t('pages.nodes.remoteTgCpuHint') }}</div>
             </a-form-item>
           </a-form>
         </a-tab-pane>

@@ -1,9 +1,9 @@
-// Package websocket provides WebSocket hub for real-time updates and notifications.
+﻿// Package websocket provides WebSocket hub for real-time updates and notifications.
 package websocket
 
 import (
-	"github.com/mhsanaei/3x-ui/v3/logger"
-	"github.com/mhsanaei/3x-ui/v3/web/global"
+	"github.com/jshir700/3x-ui/v3/logger"
+	"github.com/jshir700/3x-ui/v3/web/global"
 )
 
 // GetHub returns the global WebSocket hub instance.

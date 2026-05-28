@@ -102,6 +102,8 @@ export class AllSetting {
         this.subUriPath = "/";
         this.hasWarpSecret = false;
         this.hasNordSecret = false;
+        this.subPortLocked = false;
+        this.subExternalPort = 0;
 
         if (data == null) {
             return

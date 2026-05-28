@@ -141,6 +141,98 @@ body.dark .inbound-card {
   padding: 20px 0;
 }
 
+/* Filter bar */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 0 4px;
+}
+
+.filter-bar.mobile {
+  gap: 6px;
+}
+
+.filter-bar.mobile .ant-switch {
+  margin-right: 2px;
+}
+
+/* Reorder mode */
+.reorder-active .ant-table-tbody .ant-table-row td {
+  background: transparent !important;
+}
+
+.reorder-active .ant-table-tbody .ant-table-row:hover td {
+  background: transparent !important;
+}
+
+.reorder-active .ant-table-row {
+  transition: box-shadow 150ms ease;
+}
+
+/* Port conflict switch — disabled inbound with conflicting port */
+.conflict-switch.ant-switch {
+  opacity: 0.4;
+  filter: grayscale(1);
+}
+
+.conflict-switch.ant-switch-checked {
+  background: #ff4d4f;
+  opacity: 1;
+  filter: none;
+}
+
+.conflict-switch.ant-switch-checked:hover {
+  background: #ff7875;
+}
+
+@keyframes conflict-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-4px); }
+  40% { transform: translateX(4px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(2px); }
+}
+
+.conflict-switch.shake {
+  animation: conflict-shake 0.4s ease;
+}
+
+/* Hide expand icon for single-client inbounds */
+.hide-expand-icon .ant-table-row-expand-icon-cell {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* Tighten table cell padding */
+td.ant-table-cell.ant-table-selection-column {
+  padding: 6px 4px;
+}
+
+.ant-table-row-expand-icon-cell {
+  padding: 6px 2px;
+}
+
+/* Card expand */
+.card-expand {
+  font-size: 12px;
+  transition: transform 200ms ease;
+  flex-shrink: 0;
+}
+
+.card-expand.is-expanded {
+  transform: rotate(90deg);
+}
+
+.card-clients {
+  margin-top: 4px;
+}
+
+.card-check {
+  flex-shrink: 0;
+}
+
 @media (max-width: 768px) {
   .ant-card-head {
     padding: 0 12px;
@@ -160,4 +252,29 @@ body.dark .inbound-card {
     font-size: 22px;
     padding: 4px;
   }
+
+  .filter-bar.mobile {
+    gap: 4px;
+  }
+
+  .filter-bar.mobile .ant-switch {
+    margin-right: 0;
+  }
+}
+
+/* Dark mode overrides */
+body.dark .filter-bar {
+  background: transparent;
+}
+
+body.dark .reorder-active .ant-table-row {
+  background: transparent;
+}
+
+body.dark .conflict-switch.ant-switch-checked {
+  background: #a61d24;
+}
+
+body.dark .conflict-switch.ant-switch-checked:hover {
+  background: #cf1322;
 }

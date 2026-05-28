@@ -1,4 +1,4 @@
-package job
+﻿package job
 
 import (
 	"strings"
@@ -6,10 +6,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mhsanaei/3x-ui/v3/database/model"
-	"github.com/mhsanaei/3x-ui/v3/logger"
-	ldaputil "github.com/mhsanaei/3x-ui/v3/util/ldap"
-	"github.com/mhsanaei/3x-ui/v3/web/service"
+	"github.com/jshir700/3x-ui/v3/database/model"
+	"github.com/jshir700/3x-ui/v3/logger"
+	ldaputil "github.com/jshir700/3x-ui/v3/util/ldap"
+	"github.com/jshir700/3x-ui/v3/web/service"
 )
 
 var DefaultTruthyValues = []string{"true", "1", "yes", "on"}

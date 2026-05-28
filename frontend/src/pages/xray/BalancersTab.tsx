@@ -31,13 +31,6 @@ interface BalancerRow {
   fallbackTag: string;
 }
 
-const STRATEGY_LABELS: Record<string, string> = {
-  random: 'Random',
-  roundRobin: 'Round robin',
-  leastLoad: 'Least load',
-  leastPing: 'Least ping',
-};
-
 const DEFAULT_OBSERVATORY = Object.freeze({
   subjectSelector: [] as string[],
   probeURL: 'https://www.google.com/generate_204',
@@ -107,6 +100,13 @@ export default function BalancersTab({
       fallbackTag: b.fallbackTag || '',
     }));
   }, [templateSettings?.routing?.balancers]);
+
+  const strategyLabels = useMemo(() => ({
+    random: t('pages.xray.balancer.strategy.random'),
+    roundRobin: t('pages.xray.balancer.strategy.roundRobin'),
+    leastLoad: t('pages.xray.balancer.strategy.leastLoad'),
+    leastPing: t('pages.xray.balancer.strategy.leastPing'),
+  }), [t]);
 
   const outboundTags = useMemo(() => {
     const tags = new Set<string>();
@@ -242,20 +242,20 @@ export default function BalancersTab({
           </div>
         ),
       },
-      { title: 'Tag', dataIndex: 'tag', key: 'tag', align: 'center', width: 160 },
+      { title: t('pages.xray.balancer.tag'), dataIndex: 'tag', key: 'tag', align: 'center', width: 160 },
       {
-        title: 'Strategy',
+        title: t('pages.xray.balancer.balancerStrategy'),
         key: 'strategy',
         align: 'center',
         width: 140,
         render: (_v, record) => (
           <Tag color={record.strategy === 'random' ? 'purple' : 'green'}>
-            {STRATEGY_LABELS[record.strategy] || record.strategy}
+            {strategyLabels[record.strategy] || record.strategy}
           </Tag>
         ),
       },
       {
-        title: 'Selector',
+        title: t('pages.xray.balancer.selector'),
         key: 'selector',
         align: 'center',
         render: (_v, record) =>
@@ -265,7 +265,7 @@ export default function BalancersTab({
             </Tag>
           )),
       },
-      { title: 'Fallback', dataIndex: 'fallbackTag', key: 'fallbackTag', align: 'center', width: 160 },
+      { title: t('pages.xray.balancer.fallback'), dataIndex: 'fallbackTag', key: 'fallbackTag', align: 'center', width: 160 },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [t, isMobile],
@@ -338,8 +338,8 @@ export default function BalancersTab({
                   buttonStyle="solid"
                   size="small"
                 >
-                  {hasObservatory && <Radio.Button value="observatory">Observatory</Radio.Button>}
-                  {hasBurstObservatory && <Radio.Button value="burstObservatory">Burst Observatory</Radio.Button>}
+                  {hasObservatory && <Radio.Button value="observatory">{t('pages.xray.balancer.observatory')}</Radio.Button>}
+                  {hasBurstObservatory && <Radio.Button value="burstObservatory">{t('pages.xray.balancer.burstObservatory')}</Radio.Button>}
                 </Radio.Group>
                 <JsonEditor
                   value={obsText}

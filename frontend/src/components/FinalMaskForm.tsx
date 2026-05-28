@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button, Divider, Form, Input, InputNumber, Select, Switch } from 'antd';
 import { DeleteOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 
@@ -84,6 +85,7 @@ function newNoiseItem(): ItemRow {
 }
 
 export default function FinalMaskForm({ stream, protocol, onChange }: FinalMaskFormProps) {
+  const { t } = useTranslation();
   const isHysteria = protocol === Protocols.Hysteria || protocol === 'hysteria';
   const network = stream?.network || '';
 
@@ -121,7 +123,7 @@ export default function FinalMaskForm({ stream, protocol, onChange }: FinalMaskF
     <Form colon={false} labelCol={{ md: { span: 8 } }} wrapperCol={{ md: { span: 14 } }}>
       {showTcp && (
         <>
-          <Form.Item label="TCP Masks">
+          <Form.Item label={t('pages.inbounds.finalmask.tcpMasks')}>
             <Button
               type="primary"
               size="small"
@@ -130,13 +132,15 @@ export default function FinalMaskForm({ stream, protocol, onChange }: FinalMaskF
                 stream.addTcpMask('fragment');
                 notify();
               }}
-            />
+            >
+              {t('pages.inbounds.finalmask.addTcpMask')}
+            </Button>
           </Form.Item>
 
           {tcpMasks.map((mask, mIdx) => (
             <div key={`tcp-${mIdx}`}>
               <Divider style={{ margin: 0 }}>
-                TCP Mask {mIdx + 1}
+                {t('pages.inbounds.finalmask.tcpMaskPattern', { index: mIdx + 1 })}
                 <DeleteOutlined
                   style={{ color: 'rgb(255, 77, 79)', cursor: 'pointer', marginLeft: 8 }}
                   onClick={() => {
@@ -146,7 +150,7 @@ export default function FinalMaskForm({ stream, protocol, onChange }: FinalMaskF
                 />
               </Divider>
 
-              <Form.Item label="Type">
+              <Form.Item label={t('pages.inbounds.finalmask.type')}>
                 <Select
                   value={mask.type}
                   onChange={(v) => {
@@ -154,16 +158,16 @@ export default function FinalMaskForm({ stream, protocol, onChange }: FinalMaskF
                     notify();
                   }}
                   options={[
-                    { value: 'fragment', label: 'Fragment' },
-                    { value: 'header-custom', label: 'Header Custom' },
-                    { value: 'sudoku', label: 'Sudoku' },
+                    { value: 'fragment', label: t('pages.inbounds.finalmask.fragment') },
+                    { value: 'header-custom', label: t('pages.inbounds.finalmask.headerCustom') },
+                    { value: 'sudoku', label: t('pages.inbounds.finalmask.sudoku') },
                   ]}
                 />
               </Form.Item>
 
               {mask.type === 'fragment' && (
                 <>
-                  <Form.Item label="Packets">
+                  <Form.Item label={t('pages.inbounds.finalmask.packets')}>
                     <Select
                       value={mask.settings.packets as string}
                       onChange={(v) => {
@@ -171,14 +175,14 @@ export default function FinalMaskForm({ stream, protocol, onChange }: FinalMaskF
                         notify();
                       }}
                       options={[
-                        { value: 'tlshello', label: 'tlshello' },
+                        { value: 'tlshello', label: t('pages.inbounds.finalmask.tlshello') },
                         { value: '1-3', label: '1-3' },
                         { value: '1-5', label: '1-5' },
                       ]}
                     />
                   </Form.Item>
                   {(['length', 'delay', 'maxSplit'] as const).map((field) => (
-                    <Form.Item key={field} label={field === 'maxSplit' ? 'Max Split' : field.charAt(0).toUpperCase() + field.slice(1)}>
+                    <Form.Item key={field} label={t(`pages.inbounds.finalmask.${field}` as any)}>
                       <Input
                         value={(mask.settings[field] as string) || ''}
                         onChange={(e) => {
@@ -194,7 +198,7 @@ export default function FinalMaskForm({ stream, protocol, onChange }: FinalMaskF
               {mask.type === 'sudoku' && (
                 <>
                   {(['password', 'ascii', 'customTable', 'customTables'] as const).map((field) => (
-                    <Form.Item key={field} label={field === 'customTable' ? 'Custom Table' : field === 'customTables' ? 'Custom Tables' : field.charAt(0).toUpperCase() + field.slice(1)}>
+                    <Form.Item key={field} label={t(`pages.inbounds.finalmask.${field}` as any)}>
                       <Input
                         value={(mask.settings[field] as string) || ''}
                         onChange={(e) => {
@@ -205,7 +209,7 @@ export default function FinalMaskForm({ stream, protocol, onChange }: FinalMaskF
                     </Form.Item>
                   ))}
                   {(['paddingMin', 'paddingMax'] as const).map((field) => (
-                    <Form.Item key={field} label={field === 'paddingMin' ? 'Padding Min' : 'Padding Max'}>
+                    <Form.Item key={field} label={t(`pages.inbounds.finalmask.${field}` as any)}>
                       <InputNumber
                         value={(mask.settings[field] as number) || 0}
                         min={0}
@@ -229,14 +233,16 @@ export default function FinalMaskForm({ stream, protocol, onChange }: FinalMaskF
 
       {showUdp && (
         <>
-          <Form.Item label="UDP Masks">
-            <Button type="primary" size="small" icon={<PlusOutlined />} onClick={addUdpMaskWithDefault} />
+          <Form.Item label={t('pages.inbounds.finalmask.udpMasks')}>
+            <Button type="primary" size="small" icon={<PlusOutlined />} onClick={addUdpMaskWithDefault}>
+              {t('pages.inbounds.finalmask.addUdpMask')}
+            </Button>
           </Form.Item>
 
           {udpMasks.map((mask, mIdx) => (
             <div key={`udp-${mIdx}`}>
               <Divider style={{ margin: 0 }}>
-                UDP Mask {mIdx + 1}
+                {t('pages.inbounds.finalmask.udpMaskPattern', { index: mIdx + 1 })}
                 <DeleteOutlined
                   style={{ color: 'rgb(255, 77, 79)', cursor: 'pointer', marginLeft: 8 }}
                   onClick={() => {
@@ -246,36 +252,36 @@ export default function FinalMaskForm({ stream, protocol, onChange }: FinalMaskF
                 />
               </Divider>
 
-              <Form.Item label="Type">
+              <Form.Item label={t('pages.inbounds.finalmask.type')}>
                 <Select
                   value={mask.type}
                   onChange={(v) => changeUdpMaskType(mask, v)}
                   options={
                     isHysteria
-                      ? [{ value: 'salamander', label: 'Salamander (Hysteria2)' }]
+                      ? [{ value: 'salamander', label: t('pages.inbounds.finalmask.salamander') }]
                       : [
-                          { value: 'mkcp-aes128gcm', label: 'mKCP AES-128-GCM' },
-                          { value: 'header-dns', label: 'Header DNS' },
-                          { value: 'header-dtls', label: 'Header DTLS 1.2' },
-                          { value: 'header-srtp', label: 'Header SRTP' },
-                          { value: 'header-utp', label: 'Header uTP' },
-                          { value: 'header-wechat', label: 'Header WeChat Video' },
-                          { value: 'header-wireguard', label: 'Header WireGuard' },
-                          { value: 'mkcp-original', label: 'mKCP Original' },
-                          { value: 'xdns', label: 'xDNS' },
-                          { value: 'xicmp', label: 'xICMP' },
-                          { value: 'header-custom', label: 'Header Custom' },
-                          { value: 'noise', label: 'Noise' },
+                          { value: 'mkcp-aes128gcm', label: t('pages.inbounds.finalmask.mkcpAes128gcm') },
+                          { value: 'header-dns', label: t('pages.inbounds.finalmask.headerDns') },
+                          { value: 'header-dtls', label: t('pages.inbounds.finalmask.headerDtls') },
+                          { value: 'header-srtp', label: t('pages.inbounds.finalmask.headerSrtp') },
+                          { value: 'header-utp', label: t('pages.inbounds.finalmask.headerUtp') },
+                          { value: 'header-wechat', label: t('pages.inbounds.finalmask.headerWechat') },
+                          { value: 'header-wireguard', label: t('pages.inbounds.finalmask.headerWireguard') },
+                          { value: 'mkcp-original', label: t('pages.inbounds.finalmask.mkcpOriginal') },
+                          { value: 'xdns', label: t('pages.inbounds.finalmask.xdns') },
+                          { value: 'xicmp', label: t('pages.inbounds.finalmask.xicmp') },
+                          { value: 'header-custom', label: t('pages.inbounds.finalmask.headerCustom') },
+                          { value: 'noise', label: t('pages.inbounds.finalmask.noise') },
                         ]
                   }
                 />
               </Form.Item>
 
               {['mkcp-aes128gcm', 'salamander'].includes(mask.type) && (
-                <Form.Item label="Password">
+                <Form.Item label={t('pages.inbounds.finalmask.password')}>
                   <Input
                     value={(mask.settings.password as string) || ''}
-                    placeholder="Obfuscation password"
+                    placeholder={t('pages.inbounds.finalmask.obfuscationPassword')}
                     onChange={(e) => {
                       (mask.settings as Record<string, unknown>).password = e.target.value;
                       notify();
@@ -285,10 +291,10 @@ export default function FinalMaskForm({ stream, protocol, onChange }: FinalMaskF
               )}
 
               {mask.type === 'header-dns' && (
-                <Form.Item label="Domain">
+                <Form.Item label={t('pages.inbounds.finalmask.domain')}>
                   <Input
                     value={(mask.settings.domain as string) || ''}
-                    placeholder="e.g., www.example.com"
+                    placeholder={t('pages.inbounds.finalmask.domainPlaceholder')}
                     onChange={(e) => {
                       (mask.settings as Record<string, unknown>).domain = e.target.value;
                       notify();
@@ -298,13 +304,13 @@ export default function FinalMaskForm({ stream, protocol, onChange }: FinalMaskF
               )}
 
               {mask.type === 'xdns' && (
-                <Form.Item label="Domains">
+                <Form.Item label={t('pages.inbounds.finalmask.domains')}>
                   <Select
                     mode="tags"
                     value={(mask.settings.domains as string[]) || []}
                     style={{ width: '100%' }}
                     tokenSeparators={[',']}
-                    placeholder="e.g., www.example.com"
+                    placeholder={t('pages.inbounds.finalmask.domainPlaceholder')}
                     onChange={(v) => {
                       (mask.settings as Record<string, unknown>).domains = v;
                       notify();
@@ -323,17 +329,17 @@ export default function FinalMaskForm({ stream, protocol, onChange }: FinalMaskF
 
               {mask.type === 'xicmp' && (
                 <>
-                  <Form.Item label="IP">
+                  <Form.Item label={t('pages.inbounds.finalmask.ip')}>
                     <Input
                       value={(mask.settings.ip as string) || ''}
-                      placeholder="0.0.0.0"
+                      placeholder={t('pages.inbounds.finalmask.ipPlaceholder')}
                       onChange={(e) => {
                         (mask.settings as Record<string, unknown>).ip = e.target.value;
                         notify();
                       }}
                     />
                   </Form.Item>
-                  <Form.Item label="ID">
+                  <Form.Item label={t('pages.inbounds.finalmask.itemId')}>
                     <InputNumber
                       value={(mask.settings.id as number) || 0}
                       min={0}
@@ -352,7 +358,7 @@ export default function FinalMaskForm({ stream, protocol, onChange }: FinalMaskF
 
       {showQuic && (
         <>
-          <Form.Item label="QUIC Params">
+          <Form.Item label={t('pages.inbounds.finalmask.quicParams')}>
             <Switch
               checked={!!stream.finalmask.enableQuicParams}
               onChange={(v) => {
@@ -379,6 +385,7 @@ function HeaderCustomGroups({
   kind: 'tcp';
   onChange: () => void;
 }) {
+  const { t } = useTranslation();
   const settings = mask.settings as { clients?: ItemRow[][]; servers?: ItemRow[][] };
   if (!settings.clients) settings.clients = [];
   if (!settings.servers) settings.servers = [];
@@ -387,7 +394,7 @@ function HeaderCustomGroups({
     <>
       {(['clients', 'servers'] as const).map((groupKey) => (
         <div key={groupKey}>
-          <Form.Item label={groupKey === 'clients' ? 'Clients' : 'Servers'}>
+          <Form.Item label={groupKey === 'clients' ? t('pages.inbounds.finalmask.clients') : t('pages.inbounds.finalmask.servers')}>
             <Button
               type="primary"
               size="small"
@@ -401,7 +408,7 @@ function HeaderCustomGroups({
           {(settings[groupKey] as ItemRow[][]).map((group, gi) => (
             <div key={`${groupKey}-${gi}`}>
               <Divider style={{ margin: 0 }}>
-                {groupKey === 'clients' ? 'Clients' : 'Servers'} Group {gi + 1}
+                {groupKey === 'clients' ? t('pages.inbounds.finalmask.clientsGroup', { index: gi + 1 }) : t('pages.inbounds.finalmask.serversGroup', { index: gi + 1 })}
                 <DeleteOutlined
                   style={{ color: 'rgb(255, 77, 79)', cursor: 'pointer', marginLeft: 8 }}
                   onClick={() => {
@@ -422,6 +429,7 @@ function HeaderCustomGroups({
 }
 
 function UdpHeaderCustom({ mask, onChange }: { mask: MaskRow; onChange: () => void }) {
+  const { t } = useTranslation();
   const settings = mask.settings as { client?: ItemRow[]; server?: ItemRow[] };
   if (!settings.client) settings.client = [];
   if (!settings.server) settings.server = [];
@@ -429,7 +437,7 @@ function UdpHeaderCustom({ mask, onChange }: { mask: MaskRow; onChange: () => vo
     <>
       {(['client', 'server'] as const).map((groupKey) => (
         <div key={groupKey}>
-          <Form.Item label={groupKey === 'client' ? 'Client' : 'Server'}>
+          <Form.Item label={groupKey === 'client' ? t('pages.inbounds.finalmask.client') : t('pages.inbounds.finalmask.server')}>
             <Button
               type="primary"
               size="small"
@@ -443,7 +451,7 @@ function UdpHeaderCustom({ mask, onChange }: { mask: MaskRow; onChange: () => vo
           {(settings[groupKey] as ItemRow[]).map((item, ci) => (
             <div key={ci}>
               <Divider style={{ margin: 0 }}>
-                {groupKey === 'client' ? 'Client' : 'Server'} {ci + 1}
+                {groupKey === 'client' ? t('pages.inbounds.finalmask.clientItem', { index: ci + 1 }) : t('pages.inbounds.finalmask.serverItem', { index: ci + 1 })}
                 <DeleteOutlined
                   style={{ color: 'rgb(255, 77, 79)', cursor: 'pointer', marginLeft: 8 }}
                   onClick={() => {
@@ -462,12 +470,13 @@ function UdpHeaderCustom({ mask, onChange }: { mask: MaskRow; onChange: () => vo
 }
 
 function NoiseItems({ mask, onChange }: { mask: MaskRow; onChange: () => void }) {
+  const { t } = useTranslation();
   const settings = mask.settings as { reset?: number; noise?: ItemRow[] };
   if (!settings.noise) settings.noise = [];
 
   return (
     <>
-      <Form.Item label="Reset">
+      <Form.Item label={t('pages.inbounds.finalmask.noiseReset')}>
         <InputNumber
           value={settings.reset || 0}
           min={0}
@@ -477,7 +486,7 @@ function NoiseItems({ mask, onChange }: { mask: MaskRow; onChange: () => void })
           }}
         />
       </Form.Item>
-      <Form.Item label="Noise">
+      <Form.Item label={t('pages.inbounds.finalmask.noise')}>
         <Button
           type="primary"
           size="small"
@@ -491,7 +500,7 @@ function NoiseItems({ mask, onChange }: { mask: MaskRow; onChange: () => void })
       {(settings.noise as ItemRow[]).map((n, ni) => (
         <div key={ni}>
           <Divider style={{ margin: 0 }}>
-            Noise {ni + 1}
+            {t('pages.inbounds.finalmask.noiseItem', { index: ni + 1 })}
             <DeleteOutlined
               style={{ color: 'rgb(255, 77, 79)', cursor: 'pointer', marginLeft: 8 }}
               onClick={() => {
@@ -518,9 +527,10 @@ function ItemEditor({
   delayAsNumber?: boolean;
   delayAsString?: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <>
-      <Form.Item label="Type">
+      <Form.Item label={t('pages.inbounds.finalmask.type')}>
         <Select
           value={item.type}
           onChange={(v) => {
@@ -528,15 +538,15 @@ function ItemEditor({
             onChange();
           }}
           options={[
-            { value: 'array', label: 'Array' },
-            { value: 'str', label: 'String' },
-            { value: 'hex', label: 'Hex' },
-            { value: 'base64', label: 'Base64' },
+            { value: 'array', label: t('pages.inbounds.finalmask.array') },
+            { value: 'str', label: t('pages.inbounds.finalmask.string') },
+            { value: 'hex', label: t('pages.inbounds.finalmask.hex') },
+            { value: 'base64', label: t('pages.inbounds.finalmask.base64') },
           ]}
         />
       </Form.Item>
       {delayAsNumber && (
-        <Form.Item label="Delay (ms)">
+        <Form.Item label={t('pages.inbounds.finalmask.delayMs')}>
           <InputNumber
             value={typeof item.delay === 'number' ? item.delay : 0}
             min={0}
@@ -549,7 +559,7 @@ function ItemEditor({
       )}
       {item.type === 'array' ? (
         <>
-          <Form.Item label="Rand">
+          <Form.Item label={t('pages.inbounds.finalmask.rand')}>
             {delayAsString ? (
               <Input
                 value={String(item.rand ?? '')}
@@ -557,7 +567,7 @@ function ItemEditor({
                   item.rand = e.target.value;
                   onChange();
                 }}
-                placeholder="0 or 1-8192"
+                placeholder={t('pages.inbounds.finalmask.randPlaceholder')}
               />
             ) : (
               <InputNumber
@@ -570,10 +580,10 @@ function ItemEditor({
               />
             )}
           </Form.Item>
-          <Form.Item label="Rand Range">
+          <Form.Item label={t('pages.inbounds.finalmask.randRange')}>
             <Input
               value={item.randRange || ''}
-              placeholder="0-255"
+              placeholder={t('pages.inbounds.finalmask.randRangePlaceholder')}
               onChange={(e) => {
                 item.randRange = e.target.value;
                 onChange();
@@ -582,12 +592,12 @@ function ItemEditor({
           </Form.Item>
         </>
       ) : (
-        <Form.Item label="Packet">
+        <Form.Item label={t('pages.inbounds.finalmask.packet')}>
           {item.type === 'base64' ? (
             <Input.Group compact>
               <Input
                 value={String(item.packet ?? '')}
-                placeholder="binary data"
+                placeholder={t('pages.inbounds.finalmask.binaryData')}
                 style={{ width: 'calc(100% - 32px)' }}
                 onChange={(e) => {
                   item.packet = e.target.value;
@@ -605,7 +615,7 @@ function ItemEditor({
           ) : (
             <Input
               value={String(item.packet ?? '')}
-              placeholder="binary data"
+              placeholder={t('pages.inbounds.finalmask.binaryData')}
               onChange={(e) => {
                 item.packet = e.target.value;
                 onChange();
@@ -615,10 +625,10 @@ function ItemEditor({
         </Form.Item>
       )}
       {delayAsString && (
-        <Form.Item label="Delay">
+        <Form.Item label={t('pages.inbounds.finalmask.delay')}>
           <Input
             value={typeof item.delay === 'string' ? item.delay : ''}
-            placeholder="10-20"
+            placeholder={t('pages.inbounds.finalmask.delayPlaceholder')}
             onChange={(e) => {
               item.delay = e.target.value;
               onChange();
@@ -631,61 +641,62 @@ function ItemEditor({
 }
 
 function QuicParamsForm({ params, onChange }: { params: QuicParams; onChange: () => void }) {
+  const { t } = useTranslation();
   function update<K extends keyof QuicParams>(key: K, value: QuicParams[K]) {
     params[key] = value;
     onChange();
   }
   return (
     <>
-      <Form.Item label="Congestion">
+      <Form.Item label={t('pages.inbounds.finalmask.congestion')}>
         <Select
           value={params.congestion}
           onChange={(v) => update('congestion', v)}
           options={[
-            { value: 'reno', label: 'Reno' },
-            { value: 'bbr', label: 'BBR' },
-            { value: 'brutal', label: 'Brutal' },
-            { value: 'force-brutal', label: 'Force Brutal' },
+            { value: 'reno', label: t('pages.inbounds.finalmask.reno') },
+            { value: 'bbr', label: t('pages.inbounds.finalmask.bbr') },
+            { value: 'brutal', label: t('pages.inbounds.finalmask.brutal') },
+            { value: 'force-brutal', label: t('pages.inbounds.finalmask.forceBrutal') },
           ]}
         />
       </Form.Item>
-      <Form.Item label="Debug">
+      <Form.Item label={t('pages.inbounds.finalmask.debug')}>
         <Switch checked={!!params.debug} onChange={(v) => update('debug', v)} />
       </Form.Item>
       {['brutal', 'force-brutal'].includes(params.congestion) && (
         <>
-          <Form.Item label="Brutal Up">
+          <Form.Item label={t('pages.inbounds.finalmask.brutalUp')}>
             <Input
               value={String(params.brutalUp ?? '')}
-              placeholder="65537"
+              placeholder={t('pages.inbounds.finalmask.brutalUpPlaceholder')}
               onChange={(e) => update('brutalUp', e.target.value)}
             />
           </Form.Item>
-          <Form.Item label="Brutal Down">
+          <Form.Item label={t('pages.inbounds.finalmask.brutalDown')}>
             <Input
               value={String(params.brutalDown ?? '')}
-              placeholder="65537"
+              placeholder={t('pages.inbounds.finalmask.brutalDownPlaceholder')}
               onChange={(e) => update('brutalDown', e.target.value)}
             />
           </Form.Item>
         </>
       )}
-      <Form.Item label="UDP Hop">
+      <Form.Item label={t('pages.inbounds.finalmask.udpHop')}>
         <Switch checked={!!params.hasUdpHop} onChange={(v) => update('hasUdpHop', v)} />
       </Form.Item>
       {params.hasUdpHop && params.udpHop && (
         <>
-          <Form.Item label="Hop Ports">
+          <Form.Item label={t('pages.inbounds.finalmask.hopPorts')}>
             <Input
               value={params.udpHop.ports || ''}
-              placeholder="e.g. 20000-50000"
+              placeholder={t('pages.inbounds.finalmask.hopPortsPlaceholder')}
               onChange={(e) => {
                 params.udpHop!.ports = e.target.value;
                 onChange();
               }}
             />
           </Form.Item>
-          <Form.Item label="Hop Interval (s)">
+          <Form.Item label={t('pages.inbounds.finalmask.hopInterval')}>
             <InputNumber
               value={Number(params.udpHop.interval) || 5}
               min={5}
@@ -699,8 +710,8 @@ function QuicParamsForm({ params, onChange }: { params: QuicParams; onChange: ()
       )}
       {(
         [
-          ['maxIdleTimeout', 'Max Idle Timeout (s)', 4, 120],
-          ['keepAlivePeriod', 'Keep Alive Period (s)', 2, 60],
+          ['maxIdleTimeout', t('pages.inbounds.finalmask.maxIdleTimeout'), 4, 120],
+          ['keepAlivePeriod', t('pages.inbounds.finalmask.keepAlivePeriod'), 2, 60],
         ] as const
       ).map(([key, label, min, max]) => (
         <Form.Item key={key} label={label}>
@@ -712,16 +723,16 @@ function QuicParamsForm({ params, onChange }: { params: QuicParams; onChange: ()
           />
         </Form.Item>
       ))}
-      <Form.Item label="Disable Path MTU Dis">
+      <Form.Item label={t('pages.inbounds.finalmask.disablePathMtu')}>
         <Switch checked={!!params.disablePathMTUDiscovery} onChange={(v) => update('disablePathMTUDiscovery', v)} />
       </Form.Item>
       {(
         [
-          ['maxIncomingStreams', 'Max Incoming Streams', 8, '1024 = default'],
-          ['initStreamReceiveWindow', 'Init Stream Window', 16384, '8388608 = default'],
-          ['maxStreamReceiveWindow', 'Max Stream Window', 16384, '8388608 = default'],
-          ['initConnectionReceiveWindow', 'Init Conn Window', 16384, '20971520 = default'],
-          ['maxConnectionReceiveWindow', 'Max Conn Window', 16384, '20971520 = default'],
+          ['maxIncomingStreams', t('pages.inbounds.finalmask.maxIncomingStreams'), 8, '1024 = default'],
+          ['initStreamReceiveWindow', t('pages.inbounds.finalmask.initStreamWindow'), 16384, '8388608 = default'],
+          ['maxStreamReceiveWindow', t('pages.inbounds.finalmask.maxStreamWindow'), 16384, '8388608 = default'],
+          ['initConnectionReceiveWindow', t('pages.inbounds.finalmask.initConnWindow'), 16384, '20971520 = default'],
+          ['maxConnectionReceiveWindow', t('pages.inbounds.finalmask.maxConnWindow'), 16384, '20971520 = default'],
         ] as const
       ).map(([key, label, min, placeholder]) => (
         <Form.Item key={key} label={label}>

@@ -1,4 +1,4 @@
-# 3x-ui Development Guide
+﻿# 3x-ui Development Guide
 
 ## Project Overview
 
@@ -42,7 +42,7 @@ The panel is accessible at `http://localhost:2053`.
 ### 3. Production install (`install.sh`) — downloads pre-compiled binaries
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/jshir700/3x-ui/master/install.sh)
 ```
 
 This **never compiles from source**. It downloads pre-built binaries from GitHub Releases.

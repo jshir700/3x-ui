@@ -1,4 +1,4 @@
-package database
+﻿package database
 
 import (
 	"errors"
@@ -9,8 +9,8 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/database/model"
-	"github.com/mhsanaei/3x-ui/v3/xray"
+	"github.com/jshir700/3x-ui/v3/database/model"
+	"github.com/jshir700/3x-ui/v3/xray"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"

@@ -1,4 +1,4 @@
-import { lazy, useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Badge,
@@ -31,6 +31,7 @@ import {
   EditOutlined,
   FilterOutlined,
   InfoCircleOutlined,
+  LinkOutlined,
   MoreOutlined,
   PlusOutlined,
   QrcodeOutlined,
@@ -40,6 +41,9 @@ import {
   TeamOutlined,
   UserOutlined,
   UsergroupAddOutlined,
+  SortAscendingOutlined,
+  CheckOutlined,
+  CloseOutlined,
 } from '@ant-design/icons';
 
 import { useTheme } from '@/hooks/useTheme';
@@ -50,7 +54,8 @@ import { useDatepicker } from '@/hooks/useDatepicker';
 import type { ClientRecord, InboundOption } from '@/hooks/useClients';
 import AppSidebar from '@/components/AppSidebar';
 import CustomStatistic from '@/components/CustomStatistic';
-import { IntlUtil, SizeFormatter } from '@/utils';
+import InfinityIcon from '@/components/InfinityIcon';
+import { HttpUtil, IntlUtil, ColorUtils, SizeFormatter } from '@/utils';
 import { setMessageInstance } from '@/utils/messageBus';
 import LazyMount from '@/components/LazyMount';
 const ClientFormModal = lazy(() => import('./ClientFormModal'));
@@ -58,6 +63,7 @@ const ClientInfoModal = lazy(() => import('./ClientInfoModal'));
 const ClientQrModal = lazy(() => import('./ClientQrModal'));
 const ClientBulkAddModal = lazy(() => import('./ClientBulkAddModal'));
 const ClientBulkAdjustModal = lazy(() => import('./ClientBulkAdjustModal'));
+const SubscriptionFormModal = lazy(() => import('@/pages/subscription/SubscriptionFormModal'));
 import '@/styles/page-cards.css';
 import './ClientsPage.css';
 
@@ -106,6 +112,7 @@ export default function ClientsPage() {
     setQuery,
     inbounds, onlines, loading, fetched, subSettings,
     ipLimitEnable, tgBotEnable, expireDiff, trafficDiff, pageSize,
+    refresh,
     create, update, remove, removeMany, bulkAdjust, attach, detach,
     resetTraffic, resetAllTraffics, delDepleted, setEnable,
     applyTrafficEvent, applyClientStatsEvent, applyInvalidate,
@@ -129,6 +136,7 @@ export default function ClientsPage() {
   const [qrClient, setQrClient] = useState<ClientRecord | null>(null);
   const [bulkAddOpen, setBulkAddOpen] = useState(false);
   const [bulkAdjustOpen, setBulkAdjustOpen] = useState(false);
+  const [subFormOpen, setSubFormOpen] = useState(false);
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
 
   const initial = readFilterState();
@@ -140,6 +148,14 @@ export default function ClientsPage() {
 
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortOrder, setSortOrder] = useState<'ascend' | 'descend' | null>(null);
+  const [reorderMode, setReorderMode] = useState(false);
+  const [reorderData, setReorderData] = useState<ClientRecord[]>([]);
+  const [draggedRowId, setDraggedRowId] = useState<string | null>(null);
+  const snapshotBeforeReorder = useRef<string[]>([]);
+  const dragItemId = useRef<string | null>(null);
+  const dragStyle = useRef<HTMLStyleElement | null>(null);
+  const dragPointerId = useRef(-1);
+  const pointerDrag = useRef({ started: false, startY: 0 });
   const [currentPage, setCurrentPage] = useState(1);
   const [tablePageSize, setTablePageSize] = useState(25);
   // debouncedSearch lags behind the input so we don't spam the server on every
@@ -190,12 +206,31 @@ export default function ClientsPage() {
     return out;
   }, [inbounds]);
 
+  const inboundOrderMap = useMemo(() => {
+    const map = new Map<number, number>();
+    inbounds.forEach((ib, idx) => map.set(ib.id, idx));
+    return map;
+  }, [inbounds]);
+
   const protocolOptions = useMemo(() => {
     const values = new Set<string>((inbounds || []).map((i) => i.protocol).filter((x): x is string => !!x));
     return [...values].sort();
   }, [inbounds]);
 
   const isOnline = useCallback((email: string) => !!email && onlineSet.has(email), [onlineSet]);
+
+  const NOW = useMemo(() => Date.now(), []);
+  const inboundStateMap = useMemo(() => {
+    const map = new Map<number, { active: boolean }>();
+    for (const ib of inbounds) {
+      const used = Number(ib.up || 0) + Number(ib.down || 0);
+      const active = !!ib.enable
+        && !(ib.expiryTime && ib.expiryTime > 0 && NOW > ib.expiryTime)
+        && !(Number(ib.total || 0) > 0 && used >= Number(ib.total || 0));
+      map.set(ib.id, { active });
+    }
+    return map;
+  }, [inbounds, NOW]);
 
   function inboundLabel(id: number) {
     const ib = inboundsById[id];
@@ -327,16 +362,54 @@ export default function ClientsPage() {
     setFormOpen(true);
   }
 
-  function onDelete(row: ClientRecord) {
+  async function onDelete(row: ClientRecord) {
+    let toBeDeleted: any[] = [];
+    let affected: any[] = [];
+    try {
+      const resp = await HttpUtil.get(`/panel/api/clients/checkSubscriptions?email=${encodeURIComponent(row.email)}`);
+      if (resp?.success) {
+        toBeDeleted = resp.obj?.toBeDeleted || [];
+        affected = resp.obj?.affected || [];
+      }
+    } catch (_e) { /* proceed without subscription info */ }
+
+    const hasSubs = toBeDeleted.length > 0 || affected.length > 0;
+
+    const fmtSub = (s: any) => `${s.title || s.remark || s.subId} (${s.remark || s.subId})`;
+
+    const content = (
+      <div>
+        <div>{t('pages.clients.deleteClientText', { email: row.email })}</div>
+        {toBeDeleted.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <div>{t('pages.clients.deleteSubWillBeRemoved')}</div>
+            {toBeDeleted.map((s: any) => <div key={s.id}>  • {fmtSub(s)}</div>)}
+          </div>
+        )}
+        {affected.length > 0 && (
+          <div style={{ marginTop: (toBeDeleted.length > 0 ? 4 : 12) }}>
+            <div>{t('pages.clients.deleteSubWillNotContain')}</div>
+            {affected.map((s: any) => <div key={s.id}>  • {fmtSub(s)}</div>)}
+          </div>
+        )}
+      </div>
+    );
+
     modal.confirm({
-      title: t('pages.clients.deleteConfirmTitle', { email: row.email }),
-      content: t('pages.clients.deleteConfirmContent'),
+      title: t('pages.clients.deleteClientTitle'),
+      content,
       okText: t('delete'),
       okType: 'danger',
       cancelText: t('cancel'),
       onOk: async () => {
-        const msg = await remove(row.email);
-        if (msg?.success) messageApi.success(t('pages.clients.toasts.deleted'));
+        const endpoint = hasSubs
+          ? `/panel/api/clients/forceDel/${encodeURIComponent(row.email)}`
+          : `/panel/api/clients/del/${encodeURIComponent(row.email)}`;
+        const msg = await HttpUtil.post(endpoint);
+        if (msg?.success) {
+          messageApi.success(t('pages.clients.toasts.deleted'));
+          await refresh();
+        }
       },
     });
   }
@@ -401,28 +474,83 @@ export default function ClientsPage() {
     });
   }
 
-  function onBulkDelete() {
+  async function onBulkDelete() {
     const emails = [...selectedRowKeys];
     if (emails.length === 0) return;
+
+    // Check subscriptions for each selected client
+    const checkResults: Record<string, { toBeDeleted: any[]; affected: any[] }> = {};
+    for (const email of emails) {
+      try {
+        const resp = await HttpUtil.get(`/panel/api/clients/checkSubscriptions?email=${encodeURIComponent(email)}`);
+        if (resp?.success) {
+          checkResults[email] = {
+            toBeDeleted: resp.obj?.toBeDeleted || [],
+            affected: resp.obj?.affected || [],
+          };
+        }
+      } catch (_e) { /* skip */ }
+    }
+
+    const fmtSub = (s: any) => `${s.title || s.remark || s.subId} (${s.remark || s.subId})`;
+
+    const content = (
+      <div>
+        <div>{t('pages.clients.bulkDeleteClientText', { count: emails.length })}</div>
+        {emails.map((email) => {
+          const r = checkResults[email];
+          const hasSubInfo = r && (r.toBeDeleted.length > 0 || r.affected.length > 0);
+          return (
+            <div key={email} style={{ marginTop: 12 }}>
+              <div>━━━ {email} ━━━</div>
+              {hasSubInfo && (
+                <div>
+                  {r.toBeDeleted.length > 0 && (
+                    <div style={{ marginTop: 4 }}>
+                      <div>{t('pages.clients.deleteSubWillBeRemoved')}</div>
+                      {r.toBeDeleted.map((s: any) => <div key={s.id}>  • {fmtSub(s)}</div>)}
+                    </div>
+                  )}
+                  {r.affected.length > 0 && (
+                    <div style={{ marginTop: r.toBeDeleted.length > 0 ? 4 : 4 }}>
+                      <div>{t('pages.clients.deleteSubWillNotContain')}</div>
+                      {r.affected.map((s: any) => <div key={s.id}>  • {fmtSub(s)}</div>)}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        <div style={{ marginTop: 12 }}>{t('irreversibleWarning')}</div>
+      </div>
+    );
+
     modal.confirm({
-      title: t('pages.clients.bulkDeleteConfirmTitle', { count: emails.length }),
-      content: t('pages.clients.bulkDeleteConfirmContent'),
+      title: t('pages.clients.bulkDeleteClientTitle'),
+      content,
       okText: t('delete'),
       okType: 'danger',
       cancelText: t('cancel'),
       onOk: async () => {
-        const results = await removeMany(emails);
-        setSelectedRowKeys([]);
         let ok = 0;
         let failed = 0;
         let firstError = '';
-        for (const msg of results) {
+        for (const email of emails) {
+          const r = checkResults[email];
+          const hasSubs = r && (r.toBeDeleted.length > 0 || r.affected.length > 0);
+          const endpoint = hasSubs
+            ? `/panel/api/clients/forceDel/${encodeURIComponent(email)}`
+            : `/panel/api/clients/del/${encodeURIComponent(email)}`;
+          const msg = await HttpUtil.post(endpoint, undefined, { silent: true });
           if (msg?.success) ok++;
           else {
             failed++;
             if (!firstError && msg?.msg) firstError = msg.msg;
           }
         }
+        setSelectedRowKeys([]);
+        await refresh();
         if (failed === 0) {
           messageApi.success(t('pages.clients.toasts.bulkDeleted', { count: ok }));
         } else {
@@ -433,6 +561,47 @@ export default function ClientsPage() {
       },
     });
   }
+
+  const SUBSCRIPTION_PROTOCOLS = new Set(['vmess', 'vless', 'trojan', 'shadowsocks', 'hysteria']);
+
+  async function onCreateSubscription() {
+    const emails = new Set(selectedRowKeys);
+
+    const msg = await HttpUtil.get('/panel/api/inbounds/list');
+    if (!msg?.success || !Array.isArray(msg.obj)) {
+      messageApi.error(t('somethingWentWrong'));
+      return;
+    }
+
+    const preselect: string[] = [];
+    if (emails.size > 0) {
+      for (const ib of msg.obj) {
+        const proto = ib.protocol;
+        if (!proto || !SUBSCRIPTION_PROTOCOLS.has(proto)) continue;
+
+        let settings = ib.settings;
+        if (typeof settings === 'string') {
+          try { settings = JSON.parse(settings); } catch { continue; }
+        }
+        for (const c of (settings?.clients || [])) {
+          if (c.email && emails.has(c.email) && c.clientId) {
+            preselect.push(`${ib.id}:${c.clientId}`);
+          }
+        }
+      }
+    }
+
+    (window as any).__subPreselectIds = preselect;
+    setSubFormOpen(true);
+  }
+
+  const handleSubSave = useCallback(async (payload: Record<string, unknown>) => {
+    const msg = await HttpUtil.post('/panel/api/subscription/add', payload);
+    if (msg?.success) {
+      messageApi.success(t('pages.clients.subscriptionCreated'));
+    }
+    return { success: !!msg?.success, msg: msg?.msg };
+  }, [messageApi, t]);
 
   const onSave = useCallback(async (
     payload: Record<string, unknown> | { client: Record<string, unknown>; inboundIds: number[] },
@@ -461,6 +630,128 @@ export default function ClientsPage() {
     return classes.join(' ');
   }, [isDark, isUltra]);
 
+  async function enterReorder() {
+    const msg = await HttpUtil.get('/panel/api/clients/list') as ApiMsg<ClientRecord[]>;
+    const all: ClientRecord[] = (msg?.success && Array.isArray(msg.obj)) ? msg.obj : [...clients];
+    snapshotBeforeReorder.current = all.map((r) => r.email);
+    setReorderData(all);
+    setReorderMode(true);
+  }
+
+  function cancelReorder() {
+    setReorderMode(false);
+    setReorderData([]);
+    snapshotBeforeReorder.current = [];
+    removeDragStyle();
+  }
+
+  async function confirmReorder() {
+    const ids = reorderData.map((r) => r.id);
+    try {
+      const res = await HttpUtil.post('/panel/api/clients/reorder', { ids }, {
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!res?.success) throw new Error(res?.msg || 'reorder failed');
+      messageApi.success(t('pages.clients.reorderSuccess'));
+    } catch { return; }
+    setReorderMode(false);
+    setReorderData([]);
+    snapshotBeforeReorder.current = [];
+    removeDragStyle();
+    hydrate();
+  }
+
+  function injectDragStyle() {
+    if (dragStyle.current) return;
+    dragStyle.current = document.createElement('style');
+    dragStyle.current.textContent = '.reorder-active .ant-table-tbody .ant-table-row td{background:transparent!important}.reorder-active .ant-table-tbody .ant-table-row:hover td{background:transparent!important}';
+    document.head.appendChild(dragStyle.current);
+  }
+
+  function removeDragStyle() {
+    if (dragStyle.current) { dragStyle.current.remove(); dragStyle.current = null; }
+  }
+
+  function moveRow(idx: number, dir: -1 | 1) {
+    setReorderData((prev) => {
+      const target = idx + dir;
+      if (target < 0 || target >= prev.length) return prev;
+      const arr = [...prev];
+      [arr[idx], arr[target]] = [arr[target], arr[idx]];
+      return arr;
+    });
+  }
+
+  function rowReorderByEmail(fromEmail: string, toEmail: string) {
+    if (!fromEmail || !toEmail || fromEmail === toEmail) return;
+    setReorderData((prev) => {
+      const arr = [...prev];
+      const fromIdx = arr.findIndex((r) => r.email === fromEmail);
+      const toIdx = arr.findIndex((r) => r.email === toEmail);
+      if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return prev;
+      const [moved] = arr.splice(fromIdx, 1);
+      arr.splice(toIdx, 0, moved);
+      return arr;
+    });
+  }
+
+  // Pointer Events drag for reorder mode
+  useEffect(() => {
+    if (!reorderMode) return;
+    const timer = setTimeout(() => {
+      const table = document.querySelector('.ant-table');
+      if (!table || (table as any)._ptrInit) return;
+      (table as any)._ptrInit = true;
+      table.addEventListener('pointerdown', (e) => {
+        if (!reorderMode) return;
+        const row = (e.target as HTMLElement).closest('.ant-table-row');
+        if (!row) return;
+        const rowKey = row.getAttribute('data-row-key');
+        if (!rowKey) return;
+        e.preventDefault();
+        dragPointerId.current = e.pointerId;
+        pointerDrag.current = { started: false, startY: e.clientY };
+        dragItemId.current = rowKey;
+        document.addEventListener('pointermove', onRowPointerMove);
+        document.addEventListener('pointerup', onRowPointerUp);
+      });
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [reorderMode, reorderData]);
+
+  function onRowPointerMove(e: PointerEvent) {
+    if (e.pointerId !== dragPointerId.current) return;
+    e.preventDefault();
+    if (!pointerDrag.current.started) {
+      if (Math.abs(e.clientY - pointerDrag.current.startY) < 5) return;
+      pointerDrag.current.started = true;
+      setDraggedRowId(dragItemId.current);
+      injectDragStyle();
+    }
+    if (!dragItemId.current) return;
+    const rows = document.querySelectorAll('.ant-table-row');
+    for (const row of rows) {
+      const rect = row.getBoundingClientRect();
+      if (e.clientY >= rect.top && e.clientY < rect.bottom) {
+        const rowKey = row.getAttribute('data-row-key');
+        if (rowKey && rowKey !== dragItemId.current) {
+          rowReorderByEmail(dragItemId.current, rowKey);
+          setDraggedRowId(dragItemId.current);
+        }
+        break;
+      }
+    }
+  }
+
+  function onRowPointerUp(_e: PointerEvent) {
+    document.removeEventListener('pointermove', onRowPointerMove);
+    document.removeEventListener('pointerup', onRowPointerUp);
+    setDraggedRowId(null);
+    dragItemId.current = null;
+    dragPointerId.current = -1;
+    removeDragStyle();
+  }
+
   const onTableChange: NonNullable<TableProps<ClientRecord>['onChange']> = (pag, _filters, sorter) => {
     if (pag?.current) setCurrentPage(pag.current);
     if (pag?.pageSize) setTablePageSize(pag.pageSize);
@@ -483,8 +774,21 @@ export default function ClientsPage() {
       {
         title: t('pages.clients.actions'),
         key: 'actions',
-        width: 200,
+        width: reorderMode ? 80 : 200,
+        align: 'center' as const,
         render: (_v, record) => (
+          reorderMode ? (
+            <Space>
+              <Button size="small" disabled={reorderData.findIndex((r) => r.email === record.email) === 0} onClick={() => {
+                const idx = reorderData.findIndex((r) => r.email === record.email);
+                if (idx > 0) moveRow(idx, -1);
+              }}>{'↑'}</Button>
+              <Button size="small" disabled={reorderData.findIndex((r) => r.email === record.email) === reorderData.length - 1} onClick={() => {
+                const idx = reorderData.findIndex((r) => r.email === record.email);
+                if (idx < reorderData.length - 1) moveRow(idx, 1);
+              }}>{'↓'}</Button>
+            </Space>
+          ) : (
           <Space size={4}>
             <Tooltip title={t('pages.clients.qrCode')}>
               <Button size="small" type="text" icon={<QrcodeOutlined />} onClick={() => onShowQr(record)} />
@@ -502,10 +806,11 @@ export default function ClientsPage() {
               <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => onDelete(record)} />
             </Tooltip>
           </Space>
+          )
         ),
       },
       sortableCol({
-        title: t('pages.clients.enabled'), key: 'enable', width: 80,
+        title: t('pages.clients.enabled'), key: 'enable', width: 80, align: 'center' as const,
         render: (_v, record) => (
           <Switch
             checked={!!record.enable}
@@ -519,6 +824,7 @@ export default function ClientsPage() {
         title: t('pages.clients.online'),
         key: 'online',
         width: 90,
+        align: 'center' as const,
         render: (_v, record) => {
           const bucket = clientBucket(record);
           if (bucket === 'depleted') return <Tag color="red">{t('depleted')}</Tag>;
@@ -531,6 +837,7 @@ export default function ClientsPage() {
       sortableCol({
         title: t('pages.clients.client'),
         key: 'email',
+        onHeaderCell: () => ({ style: { textAlign: 'center' as const } }),
         render: (_v, record) => (
           <div className="email-cell">
             <span className="email">{record.email}</span>
@@ -541,28 +848,74 @@ export default function ClientsPage() {
       sortableCol({
         title: t('pages.clients.attachedInbounds'),
         key: 'inboundIds',
+        align: 'center' as const,
         render: (_v, record) => {
           const ids = record.inboundIds || [];
           if (ids.length === 0) return <span style={{ color: 'rgba(0,0,0,0.45)' }}>—</span>;
-          return ids.map((id) => (
-            <Tag key={id} color="blue" style={{ margin: 2 }}>{inboundLabel(id)}</Tag>
+          const sorted = [...ids].sort((a, b) => (inboundOrderMap.get(a) ?? 9999) - (inboundOrderMap.get(b) ?? 9999));
+          return sorted.map((id) => (
+            <Tag key={id} color={inboundStateMap.get(id)?.active ? 'blue' : 'default'} style={{ margin: 2 }}>{inboundLabel(id)}</Tag>
           ));
         },
       }, 'inboundIds'),
       sortableCol({
+        title: t('subscription.subscription'),
+        key: 'subCount',
+        width: 90,
+        align: 'center' as const,
+        render: (_v, record) => {
+          const total = record.subCount ?? 0;
+          const disabled = record.disabledSubCount ?? 0;
+          if (total === 0 && disabled === 0) return <span style={{ color: 'rgba(0,0,0,0.45)' }}>—</span>;
+          return (
+            <>
+              {total > 0 && <Tag color="green" style={{ margin: 0, padding: '0 2px' }}>{total}</Tag>}
+              {disabled > 0 && (
+                <Popover title={t('disabled')}>
+                  <Tag style={{ margin: 0, padding: '0 2px' }}>{disabled}</Tag>
+                </Popover>
+              )}
+            </>
+          );
+        },
+      }, 'subCount'),
+      sortableCol({
         title: t('pages.clients.traffic'),
         key: 'traffic',
-        render: (_v, record) => trafficLabel(record),
+        align: 'center' as const,
+        render: (_v, record) => {
+          const t = record.traffic;
+          if (!t) return '-';
+          const used = (t.up || 0) + (t.down || 0);
+          const totalBytes = (record.totalGB || 0) * 1073741824;
+          return (
+            <Popover content={(
+              <table cellPadding={2}>
+                <tbody>
+                  <tr><td>{'↑'}</td><td>{SizeFormatter.sizeFormat(t.up || 0)}</td></tr>
+                  <tr><td>{'↓'}</td><td>{SizeFormatter.sizeFormat(t.down || 0)}</td></tr>
+                </tbody>
+              </table>
+            )}>
+              <Tag color={ColorUtils.usageColor(used, 0, totalBytes)}>
+                {SizeFormatter.sizeFormat(used)} /{' '}
+                {totalBytes > 0 ? SizeFormatter.sizeFormat(totalBytes) : <InfinityIcon />}
+              </Tag>
+            </Popover>
+          );
+        },
       }, 'traffic'),
       sortableCol({
         title: t('pages.clients.remaining'),
         key: 'remaining',
-        width: 130,
+        width: 100,
+        align: 'center' as const,
         render: (_v, record) => <Tag color={remainingColor(record)}>{remainingLabel(record)}</Tag>,
       }, 'remaining'),
       sortableCol({
         title: t('pages.clients.duration'),
         key: 'expiryTime',
+        align: 'center' as const,
         render: (_v, record) => (
           <Tooltip title={expiryLabel(record)}>
             <Tag color={expiryColor(record)}>{record.expiryTime ? expiryRelative(record) : '∞'}</Tag>
@@ -571,7 +924,7 @@ export default function ClientsPage() {
       }, 'expiryTime'),
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [t, togglingEmail, sortColumn, sortOrder, clientBucket, isOnline, inboundsById]);
+  }, [t, togglingEmail, sortColumn, sortOrder, clientBucket, isOnline, inboundsById, inboundOrderMap, reorderMode, reorderData]);
 
   const tablePagination = {
     current: currentPage,
@@ -684,16 +1037,19 @@ export default function ClientsPage() {
                           <Button size="small" icon={<UsergroupAddOutlined />} onClick={() => setBulkAddOpen(true)}>
                             {!isMobile && t('pages.clients.bulk')}
                           </Button>
-                          {selectedRowKeys.length > 0 && (
-                            <>
-                              <Button size="small" icon={<ClockCircleOutlined />} onClick={() => setBulkAdjustOpen(true)}>
-                                {t('pages.clients.adjustSelected', { count: selectedRowKeys.length })}
-                              </Button>
-                              <Button danger size="small" icon={<DeleteOutlined />} onClick={onBulkDelete}>
-                                {t('pages.clients.deleteSelected', { count: selectedRowKeys.length })}
-                              </Button>
-                            </>
-                          )}
+                          <Button size="small" icon={<LinkOutlined />} onClick={onCreateSubscription}>
+                          {!isMobile && t('pages.clients.createSubscription')}
+                        </Button>
+                        {selectedRowKeys.length > 0 && (
+                          <>
+                            <Button size="small" icon={<ClockCircleOutlined />} onClick={() => setBulkAdjustOpen(true)}>
+                              {t('pages.clients.adjustSelected', { count: selectedRowKeys.length })}
+                            </Button>
+                            <Button danger size="small" icon={<DeleteOutlined />} onClick={onBulkDelete}>
+                              {t('pages.clients.deleteSelected', { count: selectedRowKeys.length })}
+                            </Button>
+                          </>
+                        )}
                           <Button size="small" icon={<RetweetOutlined />} onClick={onResetAllTraffics}>
                             {!isMobile && t('pages.clients.resetAllTraffics')}
                           </Button>
@@ -704,84 +1060,109 @@ export default function ClientsPage() {
                       }
                     >
                       <div className={isMobile ? 'filter-bar mobile' : 'filter-bar'}>
-                        <Switch
-                          checked={enableFilter}
-                          onChange={onToggleFilter}
-                          checkedChildren={<SearchOutlined />}
-                          unCheckedChildren={<FilterOutlined />}
-                        />
-                        {!enableFilter && (
-                          <Input
-                            value={searchKey}
-                            onChange={(e) => setSearchKey(e.target.value)}
-                            placeholder={t('search')}
-                            autoFocus
-                            size={isMobile ? 'small' : 'middle'}
-                            style={{ maxWidth: 300 }}
-                          />
+                        {reorderMode ? (
+                          <>
+                            <Button type="primary" size={isMobile ? 'small' : 'middle'} onClick={confirmReorder}>
+                              <CheckOutlined /> {t('pages.clients.confirmSort')}
+                            </Button>
+                            <Button size={isMobile ? 'small' : 'middle'} onClick={cancelReorder}>
+                              <CloseOutlined /> {t('pages.clients.cancelSort')}
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <Switch
+                              checked={enableFilter}
+                              onChange={onToggleFilter}
+                              checkedChildren={<SearchOutlined />}
+                              unCheckedChildren={<FilterOutlined />}
+                            />
+                            {!enableFilter && (
+                              <Input
+                                value={searchKey}
+                                onChange={(e) => setSearchKey(e.target.value)}
+                                placeholder={t('search')}
+                                autoFocus
+                                size={isMobile ? 'small' : 'middle'}
+                                style={{ maxWidth: 300 }}
+                              />
+                            )}
+                            {enableFilter && (
+                              <Radio.Group
+                                value={filterBy}
+                                onChange={(e) => setFilterBy(e.target.value)}
+                                optionType="button"
+                                buttonStyle="solid"
+                                size={isMobile ? 'small' : 'middle'}
+                              >
+                                <Radio.Button value="">{t('none')}</Radio.Button>
+                                <Radio.Button value="active">{t('subscription.active')}</Radio.Button>
+                                <Radio.Button value="deactive">{t('disabled')}</Radio.Button>
+                                <Radio.Button value="depleted">{t('depleted')}</Radio.Button>
+                                <Radio.Button value="expiring">{t('depletingSoon')}</Radio.Button>
+                                <Radio.Button value="online">{t('online')}</Radio.Button>
+                              </Radio.Group>
+                            )}
+                            <Select
+                              value={protocolFilter}
+                              onChange={(v) => {
+                                setProtocolFilter(v);
+                                if (v && inboundFilter) {
+                                  const ib = inbounds.find((x) => x.id === inboundFilter);
+                                  if (!ib || ib.protocol !== v) setInboundFilter(undefined);
+                                }
+                              }}
+                              allowClear
+                              placeholder={t('pages.inbounds.protocol')}
+                              size={isMobile ? 'small' : 'middle'}
+                              style={{ width: 150 }}
+                              options={protocolOptions.map((p) => ({ value: p, label: p }))}
+                            />
+                            <Select
+                              value={inboundFilter}
+                              onChange={(v) => setInboundFilter(v)}
+                              allowClear
+                              showSearch
+                              optionFilterProp="label"
+                              placeholder={t('inbounds')}
+                              size={isMobile ? 'small' : 'middle'}
+                              style={{ minWidth: 160, maxWidth: 240 }}
+                              options={inbounds
+                                .filter((ib) => !protocolFilter || ib.protocol === protocolFilter)
+                                .map((ib) => ({
+                                  value: ib.id,
+                                  label: ib.remark
+                                    ? `${ib.remark} (${ib.protocol || ''}${ib.port ? `:${ib.port}` : ''})`
+                                    : `#${ib.id} ${ib.protocol || ''}${ib.port ? `:${ib.port}` : ''}`,
+                                }))}
+                            />
+                            <Button
+                              size={isMobile ? 'small' : 'middle'}
+                              onClick={enterReorder}
+                            >
+                              <SortAscendingOutlined /> {t('pages.clients.sort')}
+                            </Button>
+                          </>
                         )}
-                        {enableFilter && (
-                          <Radio.Group
-                            value={filterBy}
-                            onChange={(e) => setFilterBy(e.target.value)}
-                            optionType="button"
-                            buttonStyle="solid"
-                            size={isMobile ? 'small' : 'middle'}
-                          >
-                            <Radio.Button value="">{t('none')}</Radio.Button>
-                            <Radio.Button value="active">{t('subscription.active')}</Radio.Button>
-                            <Radio.Button value="deactive">{t('disabled')}</Radio.Button>
-                            <Radio.Button value="depleted">{t('depleted')}</Radio.Button>
-                            <Radio.Button value="expiring">{t('depletingSoon')}</Radio.Button>
-                            <Radio.Button value="online">{t('online')}</Radio.Button>
-                          </Radio.Group>
-                        )}
-                        <Select
-                          value={protocolFilter}
-                          onChange={(v) => {
-                            setProtocolFilter(v);
-                            if (v && inboundFilter) {
-                              const ib = inbounds.find((x) => x.id === inboundFilter);
-                              if (!ib || ib.protocol !== v) setInboundFilter(undefined);
-                            }
-                          }}
-                          allowClear
-                          placeholder={t('pages.inbounds.protocol')}
-                          size={isMobile ? 'small' : 'middle'}
-                          style={{ width: 150 }}
-                          options={protocolOptions.map((p) => ({ value: p, label: p }))}
-                        />
-                        <Select
-                          value={inboundFilter}
-                          onChange={(v) => setInboundFilter(v)}
-                          allowClear
-                          showSearch
-                          optionFilterProp="label"
-                          placeholder={t('inbounds')}
-                          size={isMobile ? 'small' : 'middle'}
-                          style={{ minWidth: 160, maxWidth: 240 }}
-                          options={inbounds
-                            .filter((ib) => !protocolFilter || ib.protocol === protocolFilter)
-                            .map((ib) => ({
-                              value: ib.id,
-                              label: ib.remark
-                                ? `${ib.remark} (${ib.protocol || ''}${ib.port ? `:${ib.port}` : ''})`
-                                : `#${ib.id} ${ib.protocol || ''}${ib.port ? `:${ib.port}` : ''}`,
-                            }))}
-                        />
                       </div>
 
                       {!isMobile ? (
                         <Table<ClientRecord>
                           columns={columns}
-                          dataSource={sortedClients}
+                          dataSource={reorderMode ? reorderData : sortedClients}
                           loading={loading}
                           rowKey="email"
-                          rowSelection={rowSelection}
-                          pagination={tablePagination}
+                          rowSelection={reorderMode ? undefined : rowSelection}
+                          pagination={reorderMode ? false : tablePagination}
                           size="small"
                           scroll={{ x: 1200 }}
-                          onChange={onTableChange}
+                          onChange={reorderMode ? undefined : onTableChange}
+                          className={reorderMode ? 'reorder-active' : undefined}
+                          rowClassName={(_record, index) => {
+                            if (!reorderMode) return '';
+                            const row = reorderData[index];
+                            return row && row.email === draggedRowId ? 'row-dragging' : '';
+                          }}
                           locale={{
                             emptyText: (
                               <div className="clients-empty">
@@ -955,6 +1336,14 @@ export default function ClientsPage() {
               }
               return null;
             }}
+          />
+        </LazyMount>
+        <LazyMount when={subFormOpen}>
+          <SubscriptionFormModal
+            open={subFormOpen}
+            mode="add"
+            save={handleSubSave}
+            onOpenChange={setSubFormOpen}
           />
         </LazyMount>
       </Layout>

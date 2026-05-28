@@ -1,4 +1,4 @@
-// Package websocket provides a WebSocket hub for real-time updates and notifications.
+﻿// Package websocket provides a WebSocket hub for real-time updates and notifications.
 package websocket
 
 import (
@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/logger"
+	"github.com/jshir700/3x-ui/v3/logger"
 )
 
 // MessageType identifies the kind of WebSocket message.

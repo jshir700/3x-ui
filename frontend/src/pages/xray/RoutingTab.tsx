@@ -266,15 +266,15 @@ export default function RoutingTab({
 
   function ruleCriteriaChips(rule: RuleRow) {
     const chips: { label: string; value?: string }[] = [];
-    if (rule.domain) chips.push({ label: 'Domain', value: rule.domain });
-    if (rule.ip) chips.push({ label: 'IP', value: rule.ip });
-    if (rule.port) chips.push({ label: 'Port', value: rule.port });
-    if (rule.sourceIP) chips.push({ label: 'Src IP', value: rule.sourceIP });
-    if (rule.sourcePort) chips.push({ label: 'Src Port', value: rule.sourcePort });
-    if (rule.network) chips.push({ label: 'L4', value: rule.network });
-    if (rule.protocol) chips.push({ label: 'Protocol', value: rule.protocol });
-    if (rule.user) chips.push({ label: 'User', value: rule.user });
-    if (rule.vlessRoute) chips.push({ label: 'VLESS', value: rule.vlessRoute });
+    if (rule.domain) chips.push({ label: t('pages.xray.rules.domain'), value: rule.domain });
+    if (rule.ip) chips.push({ label: t('pages.xray.rules.ip'), value: rule.ip });
+    if (rule.port) chips.push({ label: t('pages.xray.rules.port'), value: rule.port });
+    if (rule.sourceIP) chips.push({ label: t('pages.xray.rules.sourceIP'), value: rule.sourceIP });
+    if (rule.sourcePort) chips.push({ label: t('pages.xray.rules.sourcePort'), value: rule.sourcePort });
+    if (rule.network) chips.push({ label: t('pages.xray.rules.l4'), value: rule.network });
+    if (rule.protocol) chips.push({ label: t('pages.xray.rules.protocol'), value: rule.protocol });
+    if (rule.user) chips.push({ label: t('pages.xray.rules.user'), value: rule.user });
+    if (rule.vlessRoute) chips.push({ label: t('pages.xray.rules.vless'), value: rule.vlessRoute });
     return chips;
   }
 
@@ -322,15 +322,15 @@ export default function RoutingTab({
         ),
       },
       {
-        title: 'Source',
+        title: t('pages.xray.rules.source'),
         align: 'left',
         width: 180,
         key: 'source',
         render: (_v, record) => (
           <div className="criterion-flow">
-            {record.sourceIP && <CriterionRow label="IP" value={record.sourceIP} title={`Source IP: ${record.sourceIP}`} />}
-            {record.sourcePort && <CriterionRow label="Port" value={record.sourcePort} title={`Source port: ${record.sourcePort}`} />}
-            {record.vlessRoute && <CriterionRow label="VLESS" value={record.vlessRoute} title={`VLESS route: ${record.vlessRoute}`} />}
+            {record.sourceIP && <CriterionRow label={t('pages.xray.rules.ip')} value={record.sourceIP} title={`${t('pages.xray.rules.sourceIP')}: ${record.sourceIP}`} />}
+            {record.sourcePort && <CriterionRow label={t('pages.xray.rules.port')} value={record.sourcePort} title={`${t('pages.xray.rules.sourcePort')}: ${record.sourcePort}`} />}
+            {record.vlessRoute && <CriterionRow label={t('pages.xray.rules.vless')} value={record.vlessRoute} title={`${t('pages.xray.rules.vlessRoute')}: ${record.vlessRoute}`} />}
             {!record.sourceIP && !record.sourcePort && !record.vlessRoute && <span className="criterion-empty">—</span>}
           </div>
         ),
@@ -342,22 +342,22 @@ export default function RoutingTab({
         key: 'network',
         render: (_v, record) => (
           <div className="criterion-flow">
-            {record.network && <CriterionRow label="L4" value={record.network} title={`L4: ${record.network}`} />}
-            {record.protocol && <CriterionRow label="Protocol" value={record.protocol} title={`Protocol: ${record.protocol}`} />}
-            {record.attrs && <CriterionRow label="Attrs" value={record.attrs} title={`Attrs: ${record.attrs}`} />}
+            {record.network && <CriterionRow label={t('pages.xray.rules.l4')} value={record.network} title={`${t('pages.xray.rules.l4Title')}: ${record.network}`} />}
+            {record.protocol && <CriterionRow label={t('pages.xray.rules.protocol')} value={record.protocol} title={`${t('pages.xray.rules.protocolTitle')}: ${record.protocol}`} />}
+            {record.attrs && <CriterionRow label={t('pages.xray.rules.attrs')} value={record.attrs} title={`${t('pages.xray.rules.attrsTitle')}: ${record.attrs}`} />}
             {!record.network && !record.protocol && !record.attrs && <span className="criterion-empty">—</span>}
           </div>
         ),
       },
       {
-        title: 'Destination',
+        title: t('pages.xray.rules.dest'),
         align: 'left',
         key: 'destination',
         render: (_v, record) => (
           <div className="criterion-flow">
-            {record.ip && <CriterionRow label="IP" value={record.ip} title={`Destination IP: ${record.ip}`} />}
-            {record.domain && <CriterionRow label="Domain" value={record.domain} title={`Domain: ${record.domain}`} />}
-            {record.port && <CriterionRow label="Port" value={record.port} title={`Destination port: ${record.port}`} />}
+            {record.ip && <CriterionRow label={t('pages.xray.rules.ip')} value={record.ip} title={`${t('pages.xray.rules.destIP')}: ${record.ip}`} />}
+            {record.domain && <CriterionRow label={t('pages.xray.rules.domain')} value={record.domain} title={`${t('pages.xray.rules.domainTitle')}: ${record.domain}`} />}
+            {record.port && <CriterionRow label={t('pages.xray.rules.port')} value={record.port} title={`${t('pages.xray.rules.destPort')}: ${record.port}`} />}
             {!record.ip && !record.domain && !record.port && <span className="criterion-empty">—</span>}
           </div>
         ),
@@ -369,8 +369,8 @@ export default function RoutingTab({
         key: 'inbound',
         render: (_v, record) => (
           <div className="criterion-flow">
-            {record.inboundTag && <CriterionRow label="Tag" value={record.inboundTag} title={`Inbound tag: ${record.inboundTag}`} />}
-            {record.user && <CriterionRow label="User" value={record.user} title={`User: ${record.user}`} />}
+            {record.inboundTag && <CriterionRow label={t('tag')} value={record.inboundTag} title={`${t('pages.inbounds.tag')}: ${record.inboundTag}`} />}
+            {record.user && <CriterionRow label={t('pages.xray.rules.user')} value={record.user} title={`${t('pages.xray.rules.userTitle')}: ${record.user}`} />}
             {!record.inboundTag && !record.user && <span className="criterion-empty">—</span>}
           </div>
         ),

@@ -1,4 +1,4 @@
-package sub
+﻿package sub
 
 import (
 	"encoding/base64"
@@ -7,19 +7,21 @@ import (
 	"net"
 	"net/url"
 	"slices"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/goccy/go-json"
 
-	"github.com/mhsanaei/3x-ui/v3/database"
-	"github.com/mhsanaei/3x-ui/v3/database/model"
-	"github.com/mhsanaei/3x-ui/v3/logger"
-	"github.com/mhsanaei/3x-ui/v3/util/common"
-	"github.com/mhsanaei/3x-ui/v3/util/random"
-	"github.com/mhsanaei/3x-ui/v3/web/service"
-	"github.com/mhsanaei/3x-ui/v3/xray"
+	"github.com/jshir700/3x-ui/v3/database"
+	"github.com/jshir700/3x-ui/v3/database/model"
+	"github.com/jshir700/3x-ui/v3/logger"
+	"github.com/jshir700/3x-ui/v3/util/common"
+	"github.com/jshir700/3x-ui/v3/util/random"
+	"github.com/jshir700/3x-ui/v3/web/service"
+	"github.com/jshir700/3x-ui/v3/xray"
 )
 
 // SubService provides business logic for generating subscription links and managing subscription data.
@@ -56,21 +58,100 @@ func (s *SubService) PrepareForRequest(host string) {
 	s.loadNodes()
 }
 
+// SubMeta holds per-subscription metadata fields loaded from the subscriptions table.
+type SubMeta struct {
+	Remark     string
+	Title      string
+	SupportUrl string
+	ProfileUrl string
+	Announce   string
+}
+
+// GetSubMeta loads per-subscription metadata (remark, title, URLs, announce).
+// Returns nil if the subscription is not found.
+func (s *SubService) GetSubMeta(subId string) *SubMeta {
+	db := database.GetDB()
+	var sub model.Subscription
+	if err := db.Where("sub_id = ?", subId).First(&sub).Error; err != nil {
+		return nil
+	}
+	return &SubMeta{
+		Remark:     sub.Remark,
+		Title:      sub.Title,
+		SupportUrl: sub.SupportUrl,
+		ProfileUrl: sub.ProfileUrl,
+		Announce:   sub.Announce,
+	}
+}
+
+// clientInboundPair couples a client with the inbound it belongs to.
+// Used to sort subscription links client-first when SyncWithInboundOrder is enabled.
+type clientInboundPair struct {
+	client  model.Client
+	inbound *model.Inbound
+}
+
+// getOrderedPairs collects every active (client, inbound) pair from inbounds,
+// optionally reordering client-first when the subscription has
+// SyncWithInboundOrder enabled.
+func (s *SubService) getOrderedPairs(inbounds []*model.Inbound, filteredEmails map[string]struct{}, subId string, sub *model.Subscription) []clientInboundPair {
+	var pairs []clientInboundPair
+	for _, inbound := range inbounds {
+		clients, err := s.inboundService.GetClients(inbound)
+		if err != nil || clients == nil {
+			continue
+		}
+		s.projectThroughFallbackMaster(inbound)
+		for _, client := range clients {
+			matched := filteredEmails == nil && client.SubID == subId
+			if !matched && filteredEmails != nil {
+				_, matched = filteredEmails[client.Email]
+			}
+			if matched && s.isClientActive(client, inbound.ClientStats) {
+				pairs = append(pairs, clientInboundPair{client: client, inbound: inbound})
+			}
+		}
+	}
+
+	// When we have a subscription with ordered ClientEmails, sort pairs
+	// by client position first, then by inbound sort_order. Both
+	// SyncWithInboundOrder modes use client-first ordering; the
+	// difference is in the UI (sort buttons hidden vs. visible).
+	if sub != nil && sub.ClientEmails != "" {
+		emailOrder := make(map[string]int)
+		for i, email := range splitSubParts(sub.ClientEmails) {
+			emailOrder[email] = i
+		}
+		sort.Slice(pairs, func(i, j int) bool {
+			oi, oki := emailOrder[pairs[i].client.Email]
+			oj, okj := emailOrder[pairs[j].client.Email]
+			if oki != okj {
+				return oki // known emails sort before unknown
+			}
+			if oki && oj != oi {
+				return oi < oj
+			}
+			// Same client (or both unknown) → sort by inbound order.
+			if pairs[i].inbound.SortOrder != pairs[j].inbound.SortOrder {
+				return pairs[i].inbound.SortOrder < pairs[j].inbound.SortOrder
+			}
+			return pairs[i].inbound.Id < pairs[j].inbound.Id
+		})
+	}
+	return pairs
+}
+
 // GetSubs retrieves subscription links for a given subscription ID and host.
-func (s *SubService) GetSubs(subId string, host string) ([]string, int64, xray.ClientTraffic, error) {
+func (s *SubService) GetSubs(subId string, host string) ([]string, int64, xray.ClientTraffic, int, int, string, string, error) {
 	s.PrepareForRequest(host)
 	var result []string
 	var traffic xray.ClientTraffic
 	var lastOnline int64
-	var hasEnabledClient bool
 	var clientTraffics []xray.ClientTraffic
-	inbounds, err := s.getInboundsBySubId(subId)
-	if err != nil {
-		return nil, 0, traffic, err
-	}
 
-	if len(inbounds) == 0 {
-		return nil, 0, traffic, nil
+	inbounds, filteredEmails, format, remark, sub, err := s.getInboundsBySubId(subId)
+	if err != nil || len(inbounds) == 0 {
+		return nil, 0, traffic, 0, 0, "", remark, err
 	}
 
 	s.datepicker, err = s.settingService.GetDatepicker()
@@ -83,28 +164,15 @@ func (s *SubService) GetSubs(subId string, host string) ([]string, int64, xray.C
 		s.emailInRemark = true
 	}
 
+	pairs := s.getOrderedPairs(inbounds, filteredEmails, subId, sub)
+
 	seenEmails := make(map[string]struct{})
-	for _, inbound := range inbounds {
-		clients, err := s.inboundService.GetClients(inbound)
-		if err != nil {
-			logger.Error("SubService - GetClients: Unable to get clients from inbound")
-		}
-		if clients == nil {
-			continue
-		}
-		s.projectThroughFallbackMaster(inbound)
-		for _, client := range clients {
-			if client.SubID == subId {
-				if client.Enable {
-					hasEnabledClient = true
-				}
-				result = append(result, s.GetLink(inbound, client.Email))
-				var ct xray.ClientTraffic
-				ct, clientTraffics = s.appendUniqueTraffic(seenEmails, clientTraffics, inbound.ClientStats, client.Email)
-				if ct.LastOnline > lastOnline {
-					lastOnline = ct.LastOnline
-				}
-			}
+	for _, p := range pairs {
+		result = append(result, s.GetLink(p.inbound, p.client.Email))
+		var ct xray.ClientTraffic
+		ct, clientTraffics = s.appendUniqueTraffic(seenEmails, clientTraffics, p.inbound.ClientStats, p.client.Email)
+		if ct.LastOnline > lastOnline {
+			lastOnline = ct.LastOnline
 		}
 	}
 
@@ -130,13 +198,20 @@ func (s *SubService) GetSubs(subId string, host string) ([]string, int64, xray.C
 			}
 		}
 	}
+	enabledClientCount := len(pairs)
+	enabledLinkCount := len(pairs)
+	hasEnabledClient := enabledClientCount > 0
 	traffic.Enable = hasEnabledClient
-	return result, lastOnline, traffic, nil
+	return result, lastOnline, traffic, enabledClientCount, enabledLinkCount, format, remark, nil
 }
 
-func (s *SubService) getInboundsBySubId(subId string) ([]*model.Inbound, error) {
+func (s *SubService) getInboundsBySubId(subId string) ([]*model.Inbound, map[string]struct{}, string, string, *model.Subscription, error) {
 	db := database.GetDB()
+	now := time.Now().UnixMilli()
+	format := ""
 	var inbounds []*model.Inbound
+
+	// Path A — old-style subscription (clients.sub_id match).
 	err := db.Model(model.Inbound{}).Preload("ClientStats").Where(`id in (
 		SELECT DISTINCT inbounds.id
 		FROM inbounds
@@ -145,11 +220,109 @@ func (s *SubService) getInboundsBySubId(subId string) ([]*model.Inbound, error) 
 		WHERE
 			inbounds.protocol in ('vmess','vless','trojan','shadowsocks','hysteria','hysteria2')
 			AND clients.sub_id = ? AND inbounds.enable = ?
-	)`, subId, true).Find(&inbounds).Error
+			AND (inbounds.expiry_time = 0 OR inbounds.expiry_time > ?)
+			AND (inbounds.total = 0 OR (inbounds.up + inbounds.down) < inbounds.total)
+	)`, subId, true, now).Order("sort_order ASC, id ASC").Find(&inbounds).Error
 	if err != nil {
-		return nil, err
+		return nil, nil, format, "", nil, err
 	}
-	return inbounds, nil
+	if len(inbounds) > 0 {
+		return inbounds, nil, format, "", nil, nil
+	}
+
+	// Fallback: look up the new-style subscription (subscriptions table).
+	var sub model.Subscription
+	if err := db.Where("sub_id = ? AND enable = ?", subId, true).First(&sub).Error; err != nil {
+		return nil, nil, format, "", nil, nil
+	}
+	format = sub.Format
+
+	// AutoIncludeAllEnabled: include ALL enabled, non-depleted, non-expired
+	// inbounds regardless of ClientEmails. filteredEmails stays nil so every
+	// active client is included.
+	if sub.AutoIncludeAllEnabled {
+		err = db.Model(model.Inbound{}).Preload("ClientStats").Where(
+			"enable = ? AND protocol IN ? AND (expiry_time = 0 OR expiry_time > ?) AND (total = 0 OR (up + down) < total)",
+			true, []string{"vmess", "vless", "trojan", "shadowsocks", "hysteria", "hysteria2"}, now,
+		).Order("sort_order ASC, id ASC").Find(&inbounds).Error
+		if err != nil {
+			return nil, nil, format, sub.Remark, &sub, err
+		}
+		return inbounds, nil, format, sub.Remark, &sub, nil
+	}
+
+	parts := splitSubParts(sub.ClientEmails)
+	if len(parts) == 0 {
+		return nil, nil, format, sub.Remark, &sub, nil
+	}
+
+	// inboundIds may contain either inbound IDs (e.g. "7,6,14") or client
+	// emails (e.g. "t@local,h@local"). Detect by "@" in the first segment.
+	if strings.Contains(parts[0], "@") {
+		err = db.Model(model.Inbound{}).Preload("ClientStats").Where(`id in (
+			SELECT DISTINCT inbounds.id
+			FROM inbounds
+			JOIN client_inbounds ON client_inbounds.inbound_id = inbounds.id
+			JOIN clients ON clients.id = client_inbounds.client_id
+			WHERE
+				inbounds.protocol in ('vmess','vless','trojan','shadowsocks','hysteria','hysteria2')
+				AND clients.email IN ? AND inbounds.enable = ?
+				AND (inbounds.expiry_time = 0 OR inbounds.expiry_time > ?)
+				AND (inbounds.total = 0 OR (inbounds.up + inbounds.down) < inbounds.total)
+		)`, parts, true, now).Order("sort_order ASC, id ASC").Find(&inbounds).Error
+		if err != nil {
+			return nil, nil, format, sub.Remark, &sub, err
+		}
+		emailSet := make(map[string]struct{}, len(parts))
+		for _, e := range parts {
+			emailSet[e] = struct{}{}
+		}
+		return inbounds, emailSet, format, sub.Remark, &sub, nil
+	}
+
+	// Parts are inbound IDs — load directly and include all their clients.
+	intIDs := make([]int, 0, len(parts))
+	for _, p := range parts {
+		if id, convErr := strconv.Atoi(p); convErr == nil {
+			intIDs = append(intIDs, id)
+		}
+	}
+	if len(intIDs) == 0 {
+		return nil, nil, format, sub.Remark, &sub, nil
+	}
+	err = db.Model(model.Inbound{}).Preload("ClientStats").Where(
+		"id IN ? AND enable = ? AND protocol IN ? AND (expiry_time = 0 OR expiry_time > ?) AND (total = 0 OR (up + down) < total)",
+		intIDs, true, []string{"vmess", "vless", "trojan", "shadowsocks", "hysteria", "hysteria2"}, now,
+	).Order("sort_order ASC, id ASC").Find(&inbounds).Error
+	if err != nil {
+		return nil, nil, format, sub.Remark, &sub, err
+	}
+	// Build email set from all clients in matched inbounds so GetSubs
+	// includes every client (the subscription links entire inbounds).
+	emailSet := make(map[string]struct{})
+	for _, inbound := range inbounds {
+		clients, _ := s.inboundService.GetClients(inbound)
+		for _, c := range clients {
+			if c.Enable {
+				emailSet[c.Email] = struct{}{}
+			}
+		}
+	}
+	return inbounds, emailSet, format, sub.Remark, &sub, nil
+}
+
+func splitSubParts(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if e := strings.TrimSpace(p); e != "" {
+			result = append(result, e)
+		}
+	}
+	return result
 }
 
 // appendUniqueTraffic resolves the traffic stats for email and appends them
@@ -172,6 +345,37 @@ func (s *SubService) getClientTraffics(traffics []xray.ClientTraffic, email stri
 		}
 	}
 	return xray.ClientTraffic{}
+}
+
+var gb = int64(1073741824)
+
+// isClientActive returns true when a client should be included in
+// subscription output — it is enabled, not expired, and not traffic-depleted.
+func (s *SubService) isClientActive(client model.Client, stats []xray.ClientTraffic) bool {
+	if !client.Enable {
+		return false
+	}
+	now := time.Now().UnixMilli()
+	if client.ExpiryTime > 0 && now > client.ExpiryTime {
+		return false
+	}
+	if client.TotalGB > 0 {
+		ct := s.getClientTraffics(stats, client.Email)
+		if ct.Up+ct.Down >= client.TotalGB*gb {
+			return false
+		}
+	}
+	return true
+}
+
+// isClientDepleted checks whether a client has exhausted its traffic quota
+// based on the stored per-client traffic record (inbound.ClientStats).
+func (s *SubService) isClientDepleted(client model.Client, stats []xray.ClientTraffic) bool {
+	if client.TotalGB <= 0 {
+		return false
+	}
+	ct := s.getClientTraffics(stats, client.Email)
+	return ct.Up+ct.Down >= client.TotalGB*gb
 }
 
 // projectThroughFallbackMaster mutates the inbound in place so its
@@ -1512,27 +1716,35 @@ func searchHost(headers any) string {
 // PageData is a view model for subpage.html
 // PageData contains data for rendering the subscription information page.
 type PageData struct {
-	Host          string
-	BasePath      string
-	SId           string
-	Enabled       bool
-	Download      string
-	Upload        string
-	Total         string
-	Used          string
-	Remained      string
-	Expire        int64
-	LastOnline    int64
-	Datepicker    string
-	DownloadByte  int64
-	UploadByte    int64
-	TotalByte     int64
-	SubUrl        string
-	SubJsonUrl    string
-	SubClashUrl   string
-	SubTitle      string
-	SubSupportUrl string
-	Result        []string
+	Host           string
+	BasePath       string
+	SId            string
+	Enabled        bool
+	Download       string
+	Upload         string
+	Total          string
+	Used           string
+	Remained       string
+	Expire         int64
+	LastOnline     int64
+	Datepicker     string
+	DownloadByte   int64
+	UploadByte     int64
+	TotalByte      int64
+	SubUrl         string
+	SubJsonUrl     string
+	SubClashUrl    string
+	SubTitle       string
+	SubRemark      string
+	SubSupportUrl  string
+	SubProfileUrl  string
+	Announce       string
+	UpdateInterval string
+	CallCount      int
+	ClientCount    int
+	LinkCount      int
+	Format         string
+	Result         []string
 }
 
 // ResolveRequest extracts scheme and host info from request/headers consistently.
@@ -1614,6 +1826,14 @@ func (s *SubService) getBaseSchemeAndHost(requestScheme, requestHostWithPort str
 	subKeyFile, _ := s.settingService.GetSubKeyFile()
 	subCertFile, _ := s.settingService.GetSubCertFile()
 
+	// Docker bridge: the container listens on 2096 internally but the host
+	// maps an external port. Use the port observed from the last request.
+	if s.settingService.IsDockerBridge() {
+		if extPort := service.GetLastSubExternalPort(); extPort > 0 {
+			subPort = extPort
+		}
+	}
+
 	// Determine scheme from TLS configuration
 	scheme := "http"
 	if subKeyFile != "" && subCertFile != "" {
@@ -1646,7 +1866,7 @@ func (s *SubService) joinPathWithID(basePath, subId string) string {
 
 // BuildPageData parses header and prepares the template view model.
 // BuildPageData constructs page data for rendering the subscription information page.
-func (s *SubService) BuildPageData(subId string, hostHeader string, traffic xray.ClientTraffic, lastOnline int64, subs []string, subURL, subJsonURL, subClashURL string, basePath string, subTitle string, subSupportUrl string) PageData {
+func (s *SubService) BuildPageData(subId string, hostHeader string, traffic xray.ClientTraffic, lastOnline int64, subs []string, subURL, subJsonURL, subClashURL string, basePath string, subTitle string, subRemark string, subSupportUrl string, subProfileUrl string, announce string, updateInterval string, callCount int, clientCount int, linkCount int, format string) PageData {
 	download := common.FormatTraffic(traffic.Down)
 	upload := common.FormatTraffic(traffic.Up)
 	total := "∞"
@@ -1664,27 +1884,35 @@ func (s *SubService) BuildPageData(subId string, hostHeader string, traffic xray
 	}
 
 	return PageData{
-		Host:          hostHeader,
-		BasePath:      basePath,
-		SId:           subId,
-		Enabled:       traffic.Enable,
-		Download:      download,
-		Upload:        upload,
-		Total:         total,
-		Used:          used,
-		Remained:      remained,
-		Expire:        traffic.ExpiryTime / 1000,
-		LastOnline:    lastOnline,
-		Datepicker:    datepicker,
-		DownloadByte:  traffic.Down,
-		UploadByte:    traffic.Up,
-		TotalByte:     traffic.Total,
-		SubUrl:        subURL,
-		SubJsonUrl:    subJsonURL,
-		SubClashUrl:   subClashURL,
-		SubTitle:      subTitle,
-		SubSupportUrl: subSupportUrl,
-		Result:        subs,
+		Host:           hostHeader,
+		BasePath:       basePath,
+		SId:            subId,
+		Enabled:        traffic.Enable,
+		Download:       download,
+		Upload:         upload,
+		Total:          total,
+		Used:           used,
+		Remained:       remained,
+		Expire:         traffic.ExpiryTime / 1000,
+		LastOnline:     lastOnline,
+		Datepicker:     datepicker,
+		DownloadByte:   traffic.Down,
+		UploadByte:     traffic.Up,
+		TotalByte:      traffic.Total,
+		SubUrl:         subURL,
+		SubJsonUrl:     subJsonURL,
+		SubClashUrl:    subClashURL,
+		SubTitle:       subTitle,
+		SubRemark:      subRemark,
+		SubSupportUrl:  subSupportUrl,
+		SubProfileUrl:  subProfileUrl,
+		Announce:       announce,
+		UpdateInterval: updateInterval,
+		CallCount:      callCount,
+		ClientCount:    clientCount,
+		LinkCount:      linkCount,
+		Format:         format,
+		Result:         subs,
 	}
 }
 

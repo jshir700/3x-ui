@@ -1,4 +1,4 @@
-package websocket
+﻿package websocket
 
 import (
 	"encoding/json"
@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	xuilogger "github.com/mhsanaei/3x-ui/v3/logger"
+	xuilogger "github.com/jshir700/3x-ui/v3/logger"
 	"github.com/op/go-logging"
 )
 

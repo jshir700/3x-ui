@@ -1,19 +1,65 @@
-package sub
+﻿package sub
 
 import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
 
-	"github.com/mhsanaei/3x-ui/v3/web/service"
+	"github.com/jshir700/3x-ui/v3/web/service"
+	"github.com/jshir700/3x-ui/v3/xray"
 
 	"github.com/gin-gonic/gin"
 )
+
+// tryAggregateSubResult holds the result of aggregating multiple subscriptions.
+type tryAggregateSubResult struct {
+	Content    string
+	Format     string
+	TotalUp    int64
+	TotalDown  int64
+	TotalLimit int64
+	LastOnline int64
+	ExpiryTime int64
+	Enable     bool
+	Links      []string
+	SubRemark  string
+}
+
+// parsedSubEntry represents a single entry parsed from a comma-separated subId list.
+// Format is "id:format" where the format suffix is optional.
+type parsedSubEntry struct {
+	ID     string
+	Format string
+}
+
+// parseSubIds splits a comma-separated subId string and parses optional format suffixes.
+// Each entry can be "id" or "id:format" where format is base64, text, json, or clash.
+func parseSubIds(raw string) []parsedSubEntry {
+	parts := strings.Split(raw, ",")
+	entries := make([]parsedSubEntry, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if idx := strings.LastIndex(p, ":"); idx > 0 {
+			suffix := strings.ToLower(p[idx+1:])
+			switch suffix {
+			case "base64", "text", "json", "clash":
+				entries = append(entries, parsedSubEntry{ID: p[:idx], Format: suffix})
+				continue
+			}
+		}
+		entries = append(entries, parsedSubEntry{ID: p, Format: ""})
+	}
+	return entries
+}
 
 // writeSubError translates a service-layer result into an HTTP response.
 // A nil error with no rows means the subId doesn't match anything (deleted
@@ -115,13 +161,111 @@ func (a *SUBController) initRouter(g *gin.RouterGroup) {
 func (a *SUBController) subs(c *gin.Context) {
 	subId := c.Param("subid")
 	scheme, host, hostWithPort, hostHeader := a.subService.ResolveRequest(c)
-	subs, lastOnline, traffic, err := a.subService.GetSubs(subId, host)
+
+	if a.settingService.IsDockerBridge() {
+		if _, portStr, err := net.SplitHostPort(hostWithPort); err == nil {
+			if port, err := strconv.Atoi(portStr); err == nil {
+				service.SetLastSubExternalPort(port)
+			}
+		}
+	}
+
+	// Try aggregate when subId contains commas — merge multiple subscriptions
+	// into a single response before the single-sub flow.
+	if strings.Contains(subId, ",") {
+		if agg := a.tryAggregateSub(subId, host); agg != nil {
+			accept := c.GetHeader("Accept")
+			if strings.Contains(strings.ToLower(accept), "text/html") || c.Query("html") == "1" || strings.EqualFold(c.Query("view"), "html") {
+				// Build aggregate page data — first subId drives URL generation and metadata
+				firstId := parseSubIds(subId)[0].ID
+				subURL, subJsonURL, subClashURL := a.subService.BuildURLs(scheme, hostWithPort, a.subPath, a.subJsonPath, a.subClashPath, firstId)
+				if !a.jsonEnabled {
+					subJsonURL = ""
+				}
+				if !a.clashEnabled {
+					subClashURL = ""
+				}
+				basePath, exists := c.Get("base_path")
+				if !exists {
+					basePath = "/"
+				}
+				basePathStr := basePath.(string)
+				traffic := xray.ClientTraffic{
+					Up:         agg.TotalUp,
+					Down:       agg.TotalDown,
+					Total:      agg.TotalLimit,
+					ExpiryTime: agg.ExpiryTime,
+					Enable:     agg.Enable,
+				}
+				aggEffectiveTitle := a.subTitle
+				aggEffectiveSupportUrl := a.subSupportUrl
+				aggEffectiveProfileUrl := a.subProfileUrl
+				aggEffectiveAnnounce := a.subAnnounce
+				if aggMeta := a.subService.GetSubMeta(firstId); aggMeta != nil {
+					if aggMeta.Title != "" {
+						aggEffectiveTitle = aggMeta.Title
+					}
+					if aggMeta.SupportUrl != "" {
+						aggEffectiveSupportUrl = aggMeta.SupportUrl
+					}
+					if aggMeta.ProfileUrl != "" {
+						aggEffectiveProfileUrl = aggMeta.ProfileUrl
+					}
+					if aggMeta.Announce != "" {
+						aggEffectiveAnnounce = aggMeta.Announce
+					}
+				}
+				page := a.subService.BuildPageData(subId, hostHeader, traffic, agg.LastOnline, agg.Links, subURL, subJsonURL, subClashURL, basePathStr, aggEffectiveTitle, agg.SubRemark, aggEffectiveSupportUrl, aggEffectiveProfileUrl, aggEffectiveAnnounce, a.updateInterval, len(parseSubIds(subId)), 0, 0, agg.Format)
+				a.serveSubPage(c, basePathStr, page)
+				return
+			}
+
+			// Client/bot response: return aggregated content
+			header := fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", agg.TotalUp, agg.TotalDown, agg.TotalLimit, agg.ExpiryTime/1000)
+			profileUrl := a.subProfileUrl
+			if profileUrl == "" {
+				profileUrl = fmt.Sprintf("%s://%s%s", scheme, hostWithPort, c.Request.RequestURI)
+			}
+			a.ApplyCommonHeaders(c, header, a.updateInterval, a.subTitle, a.subSupportUrl, profileUrl, a.subAnnounce, a.subEnableRouting, a.subRoutingRules)
+
+			if a.subEncrypt && agg.Format != "text" {
+				c.String(200, base64.StdEncoding.EncodeToString([]byte(agg.Content)))
+			} else {
+				c.String(200, agg.Content)
+			}
+			return
+		}
+		// Fall through to single-sub path if aggregation produced no results
+	}
+
+	subs, lastOnline, traffic, clientCount, linkCount, format, remark, err := a.subService.GetSubs(subId, host)
 	if err != nil || len(subs) == 0 {
 		writeSubError(c, err)
 	} else {
 		result := ""
 		for _, sub := range subs {
 			result += sub + "\n"
+		}
+
+		// Load per-subscription metadata to override server-level defaults.
+		meta := a.subService.GetSubMeta(subId)
+		effectiveTitle := a.subTitle
+		effectiveSupportUrl := a.subSupportUrl
+		effectiveProfileUrl := a.subProfileUrl
+		effectiveAnnounce := a.subAnnounce
+		if meta != nil {
+			if meta.Title != "" {
+				effectiveTitle = meta.Title
+			}
+			if meta.SupportUrl != "" {
+				effectiveSupportUrl = meta.SupportUrl
+			}
+			if meta.ProfileUrl != "" {
+				effectiveProfileUrl = meta.ProfileUrl
+			}
+			if meta.Announce != "" {
+				effectiveAnnounce = meta.Announce
+			}
 		}
 
 		// If the request expects HTML (e.g., browser) or explicitly asked (?html=1 or ?view=html), render the info page here
@@ -139,18 +283,18 @@ func (a *SUBController) subs(c *gin.Context) {
 				basePath = "/"
 			}
 			basePathStr := basePath.(string)
-			page := a.subService.BuildPageData(subId, hostHeader, traffic, lastOnline, subs, subURL, subJsonURL, subClashURL, basePathStr, a.subTitle, a.subSupportUrl)
+			page := a.subService.BuildPageData(subId, hostHeader, traffic, lastOnline, subs, subURL, subJsonURL, subClashURL, basePathStr, effectiveTitle, remark, effectiveSupportUrl, effectiveProfileUrl, effectiveAnnounce, a.updateInterval, 0, clientCount, linkCount, format)
 			a.serveSubPage(c, basePathStr, page)
 			return
 		}
 
 		// Add headers
 		header := fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", traffic.Up, traffic.Down, traffic.Total, traffic.ExpiryTime/1000)
-		profileUrl := a.subProfileUrl
+		profileUrl := effectiveProfileUrl
 		if profileUrl == "" {
 			profileUrl = fmt.Sprintf("%s://%s%s", scheme, hostWithPort, c.Request.RequestURI)
 		}
-		a.ApplyCommonHeaders(c, header, a.updateInterval, a.subTitle, a.subSupportUrl, profileUrl, a.subAnnounce, a.subEnableRouting, a.subRoutingRules)
+		a.ApplyCommonHeaders(c, header, a.updateInterval, effectiveTitle, effectiveSupportUrl, profileUrl, effectiveAnnounce, a.subEnableRouting, a.subRoutingRules)
 
 		if a.subEncrypt {
 			c.String(200, base64.StdEncoding.EncodeToString([]byte(result)))
@@ -160,19 +304,93 @@ func (a *SUBController) subs(c *gin.Context) {
 	}
 }
 
-// serveSubPage renders web/dist/subpage.html for the current subscription
+// tryAggregateSub merges multiple subscription IDs (comma-separated) into a single
+// response. Each entry may carry an optional :format suffix (base64, text, json,
+// clash). Links are concatenated; for JSON/Clash the per-client generator methods
+// on subJsonService / subClashService are used. Returns nil when no subscription
+// produced any links.
+func (a *SUBController) tryAggregateSub(subId, host string) *tryAggregateSubResult {
+	entries := parseSubIds(subId)
+	if len(entries) <= 1 {
+		return nil
+	}
+
+	// Use the first entry's format if set, otherwise default to base64
+	effectiveFormat := entries[0].Format
+	if effectiveFormat == "" {
+		effectiveFormat = "base64"
+	}
+
+	var allLinks []string
+	var totalUp, totalDown, totalLimit int64
+	var lastOnline int64
+	var firstRemark string
+	anyEnabled := false
+
+	for _, entry := range entries {
+		links, lo, traffic, _, _, _, remark, err := a.subService.GetSubs(entry.ID, host)
+		if err != nil || len(links) == 0 {
+			continue
+		}
+		if firstRemark == "" && remark != "" {
+			firstRemark = remark
+		}
+		allLinks = append(allLinks, links...)
+		totalUp += traffic.Up
+		totalDown += traffic.Down
+		if totalLimit == 0 || traffic.Total == 0 {
+			totalLimit = 0
+		} else {
+			totalLimit += traffic.Total
+		}
+		if lo > lastOnline {
+			lastOnline = lo
+		}
+		if traffic.Enable {
+			anyEnabled = true
+		}
+	}
+
+	if len(allLinks) == 0 {
+		return nil
+	}
+
+	rawContent := strings.Join(allLinks, "\n")
+	var content string
+
+	switch effectiveFormat {
+	case "text":
+		content = rawContent
+	default: // base64
+		content = base64.StdEncoding.EncodeToString([]byte(rawContent))
+	}
+
+	return &tryAggregateSubResult{
+		Content:    content,
+		Format:     effectiveFormat,
+		TotalUp:    totalUp,
+		TotalDown:  totalDown,
+		TotalLimit: totalLimit,
+		LastOnline: lastOnline,
+		Enable:     anyEnabled,
+		Links:      allLinks,
+		SubRemark:  firstRemark,
+	}
+}
+
+// serveSubPage renders web/dist/subscription.html for the current subscription
 // request. The Vite-built SPA reads window.__SUB_PAGE_DATA__ on mount —
 // we inject that here, along with window.X_UI_BASE_PATH so the
 // page's static asset references resolve correctly when the panel runs
 // behind a URL prefix.
 func (a *SUBController) serveSubPage(c *gin.Context, basePath string, page PageData) {
 	var body []byte
-	if diskBody, diskErr := os.ReadFile("web/dist/subpage.html"); diskErr == nil {
+	if diskBody, diskErr := os.ReadFile("web/dist/subscription.html"); diskErr == nil {
 		body = diskBody
 	} else {
-		readBody, err := distFS.ReadFile("dist/subpage.html")
+		readBody, err := distFS.ReadFile("dist/subscription.html")
 		if err != nil {
-			c.String(http.StatusInternalServerError, "missing embedded subpage")
+			c.String(http.StatusInternalServerError, "missing embedded subscription page")
 			return
 		}
 		body = readBody
@@ -197,23 +415,33 @@ func (a *SUBController) serveSubPage(c *gin.Context, basePath string, page PageD
 	}
 
 	subData := map[string]any{
-		"sId":          page.SId,
-		"enabled":      page.Enabled,
-		"download":     page.Download,
-		"upload":       page.Upload,
-		"total":        page.Total,
-		"used":         page.Used,
-		"remained":     page.Remained,
-		"expire":       page.Expire,
-		"lastOnline":   page.LastOnline,
-		"downloadByte": page.DownloadByte,
-		"uploadByte":   page.UploadByte,
-		"totalByte":    page.TotalByte,
-		"subUrl":       page.SubUrl,
-		"subJsonUrl":   page.SubJsonUrl,
-		"subClashUrl":  page.SubClashUrl,
-		"links":        page.Result,
-		"datepicker":   datepicker,
+		"sId":            page.SId,
+		"enabled":        page.Enabled,
+		"download":       page.Download,
+		"upload":         page.Upload,
+		"total":          page.Total,
+		"used":           page.Used,
+		"remained":       page.Remained,
+		"expire":         page.Expire,
+		"lastOnline":     page.LastOnline,
+		"downloadByte":   page.DownloadByte,
+		"uploadByte":     page.UploadByte,
+		"totalByte":      page.TotalByte,
+		"subUrl":         page.SubUrl,
+		"subJsonUrl":     page.SubJsonUrl,
+		"subClashUrl":    page.SubClashUrl,
+		"subTitle":       page.SubTitle,
+		"remark":         page.SubRemark,
+		"subSupportUrl":  page.SubSupportUrl,
+		"subProfileUrl":  page.SubProfileUrl,
+		"announce":       page.Announce,
+		"updateInterval": page.UpdateInterval,
+		"callCount":      page.CallCount,
+		"clientCount":    page.ClientCount,
+		"linkCount":      page.LinkCount,
+		"format":         page.Format,
+		"links":          page.Result,
+		"datepicker":     datepicker,
 	}
 	subDataJSON, err := json.Marshal(subData)
 	if err != nil {

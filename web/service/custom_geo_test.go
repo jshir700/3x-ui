@@ -1,4 +1,4 @@
-package service
+﻿package service
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/mhsanaei/3x-ui/v3/database/model"
+	"github.com/jshir700/3x-ui/v3/database/model"
 )
 
 // disableSSRFCheck disables the SSRF guard for the duration of a test,

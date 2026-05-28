@@ -1,4 +1,4 @@
-// Package web provides the main web server implementation for the 3x-ui panel,
+﻿// Package web provides the main web server implementation for the 3x-ui panel,
 // including HTTP/HTTPS serving, routing, templates, and background job scheduling.
 package web
 
@@ -15,17 +15,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/config"
-	"github.com/mhsanaei/3x-ui/v3/logger"
-	"github.com/mhsanaei/3x-ui/v3/util/common"
-	"github.com/mhsanaei/3x-ui/v3/web/controller"
-	"github.com/mhsanaei/3x-ui/v3/web/job"
-	"github.com/mhsanaei/3x-ui/v3/web/locale"
-	"github.com/mhsanaei/3x-ui/v3/web/middleware"
-	"github.com/mhsanaei/3x-ui/v3/web/network"
-	"github.com/mhsanaei/3x-ui/v3/web/runtime"
-	"github.com/mhsanaei/3x-ui/v3/web/service"
-	"github.com/mhsanaei/3x-ui/v3/web/websocket"
+	"github.com/jshir700/3x-ui/v3/config"
+	"github.com/jshir700/3x-ui/v3/logger"
+	"github.com/jshir700/3x-ui/v3/util/common"
+	"github.com/jshir700/3x-ui/v3/web/controller"
+	"github.com/jshir700/3x-ui/v3/web/job"
+	"github.com/jshir700/3x-ui/v3/web/locale"
+	"github.com/jshir700/3x-ui/v3/web/middleware"
+	"github.com/jshir700/3x-ui/v3/web/network"
+	"github.com/jshir700/3x-ui/v3/web/runtime"
+	"github.com/jshir700/3x-ui/v3/web/service"
+	"github.com/jshir700/3x-ui/v3/web/websocket"
 
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/sessions"

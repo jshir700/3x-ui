@@ -1,4 +1,4 @@
-// Package sub provides subscription server functionality for the 3x-ui panel,
+﻿// Package sub provides subscription server functionality for the 3x-ui panel,
 // including HTTP/HTTPS servers for serving subscription links and JSON configurations.
 package sub
 
@@ -14,12 +14,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/logger"
-	"github.com/mhsanaei/3x-ui/v3/util/common"
-	"github.com/mhsanaei/3x-ui/v3/web/locale"
-	"github.com/mhsanaei/3x-ui/v3/web/middleware"
-	"github.com/mhsanaei/3x-ui/v3/web/network"
-	"github.com/mhsanaei/3x-ui/v3/web/service"
+	"github.com/jshir700/3x-ui/v3/logger"
+	"github.com/jshir700/3x-ui/v3/util/common"
+	"github.com/jshir700/3x-ui/v3/web/locale"
+	"github.com/jshir700/3x-ui/v3/web/middleware"
+	"github.com/jshir700/3x-ui/v3/web/network"
+	"github.com/jshir700/3x-ui/v3/web/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -269,6 +269,9 @@ func (s *Server) Start() (err error) {
 	port, err := s.settingService.GetSubPort()
 	if err != nil {
 		return err
+	}
+	if s.settingService.IsDockerBridge() {
+		port = 2096
 	}
 
 	listenAddr := net.JoinHostPort(listen, strconv.Itoa(port))

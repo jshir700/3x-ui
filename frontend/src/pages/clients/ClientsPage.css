@@ -231,3 +231,23 @@ body.dark .client-card {
   text-align: center;
   opacity: 0.55;
 }
+
+/* Reorder mode */
+.reorder-active .ant-table-tbody .ant-table-row {
+  cursor: grab;
+}
+
+.reorder-active .ant-table-tbody .ant-table-row:active {
+  cursor: grabbing;
+}
+
+.reorder-active .ant-table-tbody .ant-table-row.row-dragging {
+  opacity: 0.4;
+  outline: 2px dashed #1890ff;
+  outline-offset: -2px;
+  background: rgba(24, 144, 255, 0.08);
+}
+
+body.dark .reorder-active .ant-table-tbody .ant-table-row.row-dragging {
+  background: rgba(24, 144, 255, 0.15);
+}

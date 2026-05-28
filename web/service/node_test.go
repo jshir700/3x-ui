@@ -1,9 +1,9 @@
-package service
+﻿package service
 
 import (
 	"testing"
 
-	"github.com/mhsanaei/3x-ui/v3/database/model"
+	"github.com/jshir700/3x-ui/v3/database/model"
 )
 
 func TestNormalizeBasePath(t *testing.T) {

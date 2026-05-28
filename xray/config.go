@@ -1,9 +1,9 @@
-package xray
+﻿package xray
 
 import (
 	"bytes"
 
-	"github.com/mhsanaei/3x-ui/v3/util/json_util"
+	"github.com/jshir700/3x-ui/v3/util/json_util"
 )
 
 // Config represents the complete Xray configuration structure.

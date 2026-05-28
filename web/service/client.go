@@ -1,4 +1,4 @@
-package service
+﻿package service
 
 import (
 	"context"
@@ -12,12 +12,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/mhsanaei/3x-ui/v3/database"
-	"github.com/mhsanaei/3x-ui/v3/database/model"
-	"github.com/mhsanaei/3x-ui/v3/logger"
-	"github.com/mhsanaei/3x-ui/v3/util/common"
-	"github.com/mhsanaei/3x-ui/v3/util/random"
-	"github.com/mhsanaei/3x-ui/v3/xray"
+	"github.com/jshir700/3x-ui/v3/database"
+	"github.com/jshir700/3x-ui/v3/database/model"
+	"github.com/jshir700/3x-ui/v3/logger"
+	"github.com/jshir700/3x-ui/v3/util/common"
+	"github.com/jshir700/3x-ui/v3/util/random"
+	"github.com/jshir700/3x-ui/v3/xray"
 
 	"gorm.io/gorm"
 )
@@ -338,7 +338,7 @@ func (s *ClientService) GetInboundIdsForRecord(id int) ([]int, error) {
 func (s *ClientService) List() ([]ClientWithAttachments, error) {
 	db := database.GetDB()
 	var rows []model.ClientRecord
-	if err := db.Order("id ASC").Find(&rows).Error; err != nil {
+	if err := db.Order("sort_order ASC, id ASC").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	if len(rows) == 0 {
@@ -354,8 +354,16 @@ func (s *ClientService) List() ([]ClientWithAttachments, error) {
 		}
 	}
 
-	var links []model.ClientInbound
-	if err := db.Where("client_id IN ?", clientIds).Find(&links).Error; err != nil {
+	var links []struct {
+		ClientId  int `gorm:"column:client_id"`
+		InboundId int `gorm:"column:inbound_id"`
+	}
+	if err := db.Table("client_inbounds").
+		Select("client_inbounds.client_id, client_inbounds.inbound_id").
+		Joins("JOIN inbounds ON inbounds.id = client_inbounds.inbound_id").
+		Where("client_inbounds.client_id IN ?", clientIds).
+		Order("inbounds.sort_order ASC, inbounds.id ASC").
+		Find(&links).Error; err != nil {
 		return nil, err
 	}
 	attachments := make(map[int][]int, len(rows))
@@ -748,6 +756,32 @@ func (s *ClientService) DetachByEmailMany(inboundSvc *InboundService, email stri
 	return s.Detach(inboundSvc, rec.Id, inboundIds)
 }
 
+// ForceDeleteByEmail deletes a client record and cleans up all subscription
+// associations. Returns the count of subscriptions that were also deleted.
+func (s *ClientService) ForceDeleteByEmail(inboundSvc *InboundService, email string) (subsDeleted int, needRestart bool, err error) {
+	var subSvc SubscriptionService
+	_, toBeDeleted, err := subSvc.CheckClientSubscriptions(email)
+	if err != nil {
+		return 0, false, err
+	}
+	// Delete subscriptions that only contain this client
+	for _, sub := range toBeDeleted {
+		if delErr := subSvc.Delete(sub.Id); delErr != nil {
+			return subsDeleted, false, delErr
+		}
+		subsDeleted++
+	}
+	// Remove this email from remaining subscriptions
+	affected, _, _ := subSvc.CheckClientSubscriptions(email)
+	for _, sub := range affected {
+		if rmErr := subSvc.RemoveClientEmail(sub.Id, email); rmErr != nil {
+			return subsDeleted, false, rmErr
+		}
+	}
+	needRestart, err = s.DeleteByEmail(inboundSvc, email, false)
+	return
+}
+
 func (s *ClientService) DeleteByEmail(inboundSvc *InboundService, email string, keepTraffic bool) (bool, error) {
 	if email == "" {
 		return false, common.NewError("client email is required")
@@ -808,6 +842,8 @@ func (s *ClientService) ResetTrafficByEmail(inboundSvc *InboundService, email st
 type ClientSlim struct {
 	Email      string              `json:"email"`
 	SubID      string              `json:"subId"`
+	SubCount         int                 `json:"subCount"`
+	DisabledSubCount int                 `json:"disabledSubCount"`
 	Enable     bool                `json:"enable"`
 	TotalGB    int64               `json:"totalGB"`
 	ExpiryTime int64               `json:"expiryTime"`
@@ -870,7 +906,7 @@ const (
 // query itself is unchanged from List(); the win is that the response
 // only carries 25-ish slim rows over the wire instead of all 2000 full
 // records, which on real panels was the dominant cost.
-func (s *ClientService) ListPaged(inboundSvc *InboundService, settingSvc *SettingService, params ClientPageParams) (*ClientPageResponse, error) {
+func (s *ClientService) ListPaged(inboundSvc *InboundService, settingSvc *SettingService, subSvc *SubscriptionService, params ClientPageParams) (*ClientPageResponse, error) {
 	all, err := s.List()
 	if err != nil {
 		return nil, err
@@ -951,9 +987,18 @@ func (s *ClientService) ListPaged(inboundSvc *InboundService, settingSvc *Settin
 	}
 	pageRows := filtered[start:end]
 
+	subCounts, _ := subSvc.GetClientSubCounts()
+	disabledSubCounts, _ := subSvc.GetClientDisabledSubCounts()
 	items := make([]ClientSlim, 0, len(pageRows))
 	for _, c := range pageRows {
-		items = append(items, toClientSlim(c))
+		slim := toClientSlim(c)
+		if subCounts != nil {
+			slim.SubCount = subCounts[c.Email]
+		}
+		if disabledSubCounts != nil {
+			slim.DisabledSubCount = disabledSubCounts[c.Email]
+		}
+		items = append(items, slim)
 	}
 
 	return &ClientPageResponse{
@@ -1738,6 +1783,10 @@ func (s *ClientService) UpdateInboundClient(inboundSvc *InboundService, data *mo
 			emailUnchanged := strings.EqualFold(oldEmail, clients[0].Email)
 			targetExists := int64(0)
 			if !emailUnchanged {
+				var subSvc SubscriptionService
+				if syncErr := subSvc.SyncClientEmail(oldEmail, clients[0].Email); syncErr != nil {
+					logger.Error("Failed to sync client email in subscriptions:", syncErr)
+				}
 				if err = tx.Model(xray.ClientTraffic{}).Where("email = ?", clients[0].Email).Count(&targetExists).Error; err != nil {
 					return false, err
 				}
@@ -2121,6 +2170,8 @@ func (s *ClientService) SetClientTelegramUserID(inboundSvc *InboundService, traf
 				clientId = oldClient.Password
 			case "shadowsocks":
 				clientId = oldClient.Email
+			case "hysteria", "hysteria2":
+				clientId = oldClient.Auth
 			default:
 				clientId = oldClient.ID
 			}
@@ -2138,16 +2189,13 @@ func (s *ClientService) SetClientTelegramUserID(inboundSvc *InboundService, traf
 		return false, err
 	}
 	clients := settings["clients"].([]any)
-	var newClients []any
 	for client_index := range clients {
 		c := clients[client_index].(map[string]any)
 		if c["email"] == clientEmail {
 			c["tgId"] = tgId
 			c["updated_at"] = time.Now().Unix() * 1000
-			newClients = append(newClients, any(c))
 		}
 	}
-	settings["clients"] = newClients
 	modifiedSettings, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return false, err
@@ -2207,6 +2255,8 @@ func (s *ClientService) ToggleClientEnableByEmail(inboundSvc *InboundService, cl
 				clientId = oldClient.Password
 			case "shadowsocks":
 				clientId = oldClient.Email
+			case "hysteria", "hysteria2":
+				clientId = oldClient.Auth
 			default:
 				clientId = oldClient.ID
 			}
@@ -2225,16 +2275,13 @@ func (s *ClientService) ToggleClientEnableByEmail(inboundSvc *InboundService, cl
 		return false, false, err
 	}
 	clients := settings["clients"].([]any)
-	var newClients []any
 	for client_index := range clients {
 		c := clients[client_index].(map[string]any)
 		if c["email"] == clientEmail {
 			c["enable"] = !clientOldEnabled
 			c["updated_at"] = time.Now().Unix() * 1000
-			newClients = append(newClients, any(c))
 		}
 	}
-	settings["clients"] = newClients
 	modifiedSettings, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return false, false, err
@@ -2287,6 +2334,8 @@ func (s *ClientService) ResetClientIpLimitByEmail(inboundSvc *InboundService, cl
 				clientId = oldClient.Password
 			case "shadowsocks":
 				clientId = oldClient.Email
+			case "hysteria", "hysteria2":
+				clientId = oldClient.Auth
 			default:
 				clientId = oldClient.ID
 			}
@@ -2304,16 +2353,13 @@ func (s *ClientService) ResetClientIpLimitByEmail(inboundSvc *InboundService, cl
 		return false, err
 	}
 	clients := settings["clients"].([]any)
-	var newClients []any
 	for client_index := range clients {
 		c := clients[client_index].(map[string]any)
 		if c["email"] == clientEmail {
 			c["limitIp"] = count
 			c["updated_at"] = time.Now().Unix() * 1000
-			newClients = append(newClients, any(c))
 		}
 	}
-	settings["clients"] = newClients
 	modifiedSettings, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return false, err
@@ -2346,6 +2392,8 @@ func (s *ClientService) ResetClientExpiryTimeByEmail(inboundSvc *InboundService,
 				clientId = oldClient.Password
 			case "shadowsocks":
 				clientId = oldClient.Email
+			case "hysteria", "hysteria2":
+				clientId = oldClient.Auth
 			default:
 				clientId = oldClient.ID
 			}
@@ -2363,16 +2411,13 @@ func (s *ClientService) ResetClientExpiryTimeByEmail(inboundSvc *InboundService,
 		return false, err
 	}
 	clients := settings["clients"].([]any)
-	var newClients []any
 	for client_index := range clients {
 		c := clients[client_index].(map[string]any)
 		if c["email"] == clientEmail {
 			c["expiryTime"] = expiry_time
 			c["updated_at"] = time.Now().Unix() * 1000
-			newClients = append(newClients, any(c))
 		}
 	}
-	settings["clients"] = newClients
 	modifiedSettings, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return false, err
@@ -2408,6 +2453,8 @@ func (s *ClientService) ResetClientTrafficLimitByEmail(inboundSvc *InboundServic
 				clientId = oldClient.Password
 			case "shadowsocks":
 				clientId = oldClient.Email
+			case "hysteria", "hysteria2":
+				clientId = oldClient.Auth
 			default:
 				clientId = oldClient.ID
 			}
@@ -2425,16 +2472,13 @@ func (s *ClientService) ResetClientTrafficLimitByEmail(inboundSvc *InboundServic
 		return false, err
 	}
 	clients := settings["clients"].([]any)
-	var newClients []any
 	for client_index := range clients {
 		c := clients[client_index].(map[string]any)
 		if c["email"] == clientEmail {
 			c["totalGB"] = totalGB * 1024 * 1024 * 1024
 			c["updated_at"] = time.Now().Unix() * 1000
-			newClients = append(newClients, any(c))
 		}
 	}
-	settings["clients"] = newClients
 	modifiedSettings, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return false, err
@@ -2442,4 +2486,18 @@ func (s *ClientService) ResetClientTrafficLimitByEmail(inboundSvc *InboundServic
 	inbound.Settings = string(modifiedSettings)
 	needRestart, err := s.UpdateInboundClient(inboundSvc, inbound, clientId)
 	return needRestart, err
+}
+
+// Reorder updates the sort_order of client records so the list display follows
+// the user's manual order. IDs not in the list keep their current sort_order.
+func (s *ClientService) Reorder(ids []int) error {
+	db := database.GetDB()
+	return db.Transaction(func(tx *gorm.DB) error {
+		for i, id := range ids {
+			if err := tx.Model(&model.ClientRecord{}).Where("id = ?", id).Update("sort_order", (i+1)*10).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

@@ -1,4 +1,4 @@
-package job
+﻿package job
 
 import (
 	"encoding/json"
@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/database"
-	"github.com/mhsanaei/3x-ui/v3/database/model"
-	xuilogger "github.com/mhsanaei/3x-ui/v3/logger"
+	"github.com/jshir700/3x-ui/v3/database"
+	"github.com/jshir700/3x-ui/v3/database/model"
+	xuilogger "github.com/jshir700/3x-ui/v3/logger"
 	"github.com/op/go-logging"
 )
 

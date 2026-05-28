@@ -1,4 +1,4 @@
-// Package service: WebSocketService owns the per-connection pump goroutines
+﻿// Package service: WebSocketService owns the per-connection pump goroutines
 // and bridges the HTTP-layer controller to the broadcast hub. The controller
 // handles the upgrade handshake and authentication, then hands the raw
 // connection to this service which takes ownership of its lifecycle.
@@ -7,9 +7,9 @@ package service
 import (
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/logger"
-	"github.com/mhsanaei/3x-ui/v3/util/common"
-	"github.com/mhsanaei/3x-ui/v3/web/websocket"
+	"github.com/jshir700/3x-ui/v3/logger"
+	"github.com/jshir700/3x-ui/v3/util/common"
+	"github.com/jshir700/3x-ui/v3/web/websocket"
 
 	"github.com/google/uuid"
 	ws "github.com/gorilla/websocket"

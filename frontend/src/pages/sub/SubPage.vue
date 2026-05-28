@@ -95,11 +95,52 @@ function cycleTheme() {
 }
 
 const QR_SIZE = 200;
+const qrRef = ref(null);
 
 async function copy(value) {
   if (!value) return;
   const ok = await ClipboardManager.copyText(value);
   if (ok) message.success(t('copied'));
+}
+
+async function getQrBlob() {
+  const el = qrRef.value?.$el || qrRef.value;
+  const canvas = el?.querySelector?.('canvas');
+  if (canvas) return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  const svgEl = el?.querySelector?.('svg');
+  if (!svgEl) return null;
+  const svgData = new XMLSerializer().serializeToString(svgEl);
+  const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(svgBlob);
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const cvs = document.createElement('canvas');
+      cvs.width = QR_SIZE;
+      cvs.height = QR_SIZE;
+      const ctx = cvs.getContext('2d');
+      if (!ctx) { URL.revokeObjectURL(url); resolve(null); return; }
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, QR_SIZE, QR_SIZE);
+      ctx.drawImage(img, 0, 0, QR_SIZE, QR_SIZE);
+      URL.revokeObjectURL(url);
+      cvs.toBlob((blob) => resolve(blob), 'image/png');
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+    img.src = url;
+  });
+}
+
+async function copyImage() {
+  const blob = await getQrBlob();
+  if (!blob) return;
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    message.success(t('copiedQrImage'));
+  } catch {
+    const errMsg = t('copyFailed');
+    if (errMsg !== 'copyFailed') message.error(errMsg);
+  }
 }
 function open(url) { if (url) window.open(url, '_blank'); }
 
@@ -250,9 +291,9 @@ const displayContent = computed(() => {
             </a-space>
           </a-col>
           <a-col :xs="24" :sm="9" class="qr-col">
-            <div class="qr-box">
+            <div ref="qrRef" class="qr-box">
               <a-qrcode :value="subUrl" :size="QR_SIZE" type="canvas" :bordered="false"
-                :color="qrColor" :bg-color="qrBg" :title="t('copied')" @click="copy(subUrl)" />
+                :color="qrColor" :bg-color="qrBg" :title="t('clickToCopyImage')" @click="copyImage" />
               <a-tag color="purple" class="qr-tag">{{ t('pages.settings.subSettings') }}</a-tag>
             </div>
           </a-col>

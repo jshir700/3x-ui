@@ -1,11 +1,11 @@
-package service
+﻿package service
 
 import (
 	"encoding/json"
 	"testing"
 
-	"github.com/mhsanaei/3x-ui/v3/database/model"
-	"github.com/mhsanaei/3x-ui/v3/xray"
+	"github.com/jshir700/3x-ui/v3/database/model"
+	"github.com/jshir700/3x-ui/v3/xray"
 )
 
 func TestClientWithAttachmentsMarshalJSONIncludesExtras(t *testing.T) {

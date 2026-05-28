@@ -1,4 +1,4 @@
-// Package entity defines data structures and entities used by the web layer of the 3x-ui panel.
+﻿// Package entity defines data structures and entities used by the web layer of the 3x-ui panel.
 package entity
 
 import (
@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/util/common"
+	"github.com/jshir700/3x-ui/v3/util/common"
 )
 
 // Msg represents a standard API response message with success status, message text, and optional data object.
@@ -132,6 +132,9 @@ type AllSettingView struct {
 	HasApiToken       bool `json:"hasApiToken"`
 	HasWarpSecret     bool `json:"hasWarpSecret"`
 	HasNordSecret     bool `json:"hasNordSecret"`
+
+	SubPortLocked     bool `json:"subPortLocked"`
+	SubExternalPort int  `json:"subExternalPort"`
 }
 
 // CheckValid validates all settings in the AllSetting struct, checking IP addresses, ports, SSL certificates, and other configuration values.

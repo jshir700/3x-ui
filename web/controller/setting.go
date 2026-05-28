@@ -1,14 +1,14 @@
-package controller
+﻿package controller
 
 import (
 	"errors"
 	"strconv"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/util/crypto"
-	"github.com/mhsanaei/3x-ui/v3/web/entity"
-	"github.com/mhsanaei/3x-ui/v3/web/service"
-	"github.com/mhsanaei/3x-ui/v3/web/session"
+	"github.com/jshir700/3x-ui/v3/util/crypto"
+	"github.com/jshir700/3x-ui/v3/web/entity"
+	"github.com/jshir700/3x-ui/v3/web/service"
+	"github.com/jshir700/3x-ui/v3/web/session"
 
 	"github.com/gin-gonic/gin"
 )
@@ -54,7 +54,7 @@ func (a *SettingController) initRouter(g *gin.RouterGroup) {
 
 // getAllSetting retrieves all current settings.
 func (a *SettingController) getAllSetting(c *gin.Context) {
-	allSetting, err := a.settingService.GetAllSetting()
+	allSetting, err := a.settingService.GetAllSettingView()
 	if err != nil {
 		jsonMsg(c, I18nWeb(c, "pages.settings.toasts.getSettings"), err)
 		return

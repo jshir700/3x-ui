@@ -2,6 +2,19 @@ import dayjs from 'dayjs';
 import { ObjectUtil, NumberFormatter, SizeFormatter } from '@/utils';
 import { Inbound, Protocols } from './inbound.js';
 
+export function coerceInboundJsonField(value) {
+    if (value == null) return {};
+    if (typeof value === 'object') return value;
+    if (typeof value !== 'string') return {};
+    const trimmed = value.trim();
+    if (trimmed === '') return {};
+    try {
+        return JSON.parse(trimmed);
+    } catch (_e) {
+        return {};
+    }
+}
+
 export class DBInbound {
 
     constructor(data) {
@@ -10,7 +23,6 @@ export class DBInbound {
         this.up = 0;
         this.down = 0;
         this.total = 0;
-        this.allTime = 0;
         this.remark = "";
         this.enable = true;
         this.expiryTime = 0;
@@ -116,32 +128,9 @@ export class DBInbound {
             return this._cachedInbound;
         }
 
-        let settings = {};
-        if (!ObjectUtil.isEmpty(this.settings)) {
-            try {
-                settings = JSON.parse(this.settings);
-            } catch (_e) {
-                console.warn('[DBInbound] invalid settings JSON:', this.id, this.remark);
-            }
-        }
-
-        let streamSettings = {};
-        if (!ObjectUtil.isEmpty(this.streamSettings)) {
-            try {
-                streamSettings = JSON.parse(this.streamSettings);
-            } catch (_e) {
-                console.warn('[DBInbound] invalid streamSettings JSON:', this.id, this.remark);
-            }
-        }
-
-        let sniffing = {};
-        if (!ObjectUtil.isEmpty(this.sniffing)) {
-            try {
-                sniffing = JSON.parse(this.sniffing);
-            } catch (_e) {
-                console.warn('[DBInbound] invalid sniffing JSON:', this.id, this.remark);
-            }
-        }
+        const settings = coerceInboundJsonField(this.settings);
+        const streamSettings = coerceInboundJsonField(this.streamSettings);
+        const sniffing = coerceInboundJsonField(this.sniffing);
 
 		const config = {
 		    port: this.port,

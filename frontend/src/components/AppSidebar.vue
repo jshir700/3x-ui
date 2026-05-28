@@ -44,8 +44,8 @@ const prefix = props.basePath?.startsWith('/') ? props.basePath : `/${props.base
 const tabs = computed(() => [
   { key: `${prefix}panel/`, icon: 'dashboard', title: t('menu.dashboard') },
   { key: `${prefix}panel/inbounds`, icon: 'user', title: t('menu.inbounds') },
-  { key: `${prefix}panel/nodes`, icon: 'cluster', title: t('menu.nodes') },
   { key: `${prefix}panel/subscription`, icon: 'link', title: t('menu.subscription') },
+  { key: `${prefix}panel/nodes`, icon: 'cluster', title: t('menu.nodes') },
   { key: `${prefix}panel/settings`, icon: 'setting', title: t('menu.settings') },
   { key: `${prefix}panel/xray`, icon: 'tool', title: t('menu.xray') },
   { key: `${prefix}panel/api-docs`, icon: 'apidocs', title: t('menu.apiDocs') },

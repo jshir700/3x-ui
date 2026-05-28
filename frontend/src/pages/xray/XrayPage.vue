@@ -204,10 +204,10 @@ function scrollTarget() {
 
 function confirmRestart() {
   Modal.confirm({
-    title: 'Restart xray?',
-    content: 'Reloads the xray service with the saved configuration.',
-    okText: 'Restart',
-    cancelText: 'Cancel',
+    title: t('pages.xray.restartConfirmTitle'),
+    content: t('pages.xray.restartConfirmDesc'),
+    okText: t('pages.xray.restart'),
+    cancelText: t('cancel'),
     onOk: () => restartXray(),
   });
 }
@@ -289,7 +289,7 @@ onBeforeUnmount(() => {
                             {{ t('pages.xray.restart') }}
                           </a-button>
                           <a-popover v-if="restartResult" placement="rightTop">
-                            <template #title>Xray restart output</template>
+                            <template #title>{{ t('pages.xray.restartOutput') }}</template>
                             <template #content>
                               <pre class="restart-result">{{ restartResult }}</pre>
                             </template>

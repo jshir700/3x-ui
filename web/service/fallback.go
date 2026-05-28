@@ -1,11 +1,11 @@
-package service
+﻿package service
 
 import (
 	"fmt"
 	"strings"
 
-	"github.com/mhsanaei/3x-ui/v3/database"
-	"github.com/mhsanaei/3x-ui/v3/database/model"
+	"github.com/jshir700/3x-ui/v3/database"
+	"github.com/jshir700/3x-ui/v3/database/model"
 
 	"gorm.io/gorm"
 )

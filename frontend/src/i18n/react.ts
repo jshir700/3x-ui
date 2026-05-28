@@ -41,3 +41,7 @@ export async function readyI18n() {
 }
 
 export { i18next as i18n };
+
+export function t(key: string, options?: Record<string, unknown>): string {
+  return i18next.t(key, options);
+}

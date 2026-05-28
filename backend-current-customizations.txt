@@ -1,0 +1,1948 @@
+warning: in the working copy of 'sub/subController.go', LF will be replaced by CRLF the next time Git touches it
+diff --git a/database/db.go b/database/db.go
+index fba55a3c..125dd688 100644
+--- a/database/db.go
++++ b/database/db.go
+@@ -66,6 +66,7 @@ func initModels() error {
+ 		&model.CustomGeoResource{},
+ 		&model.Node{},
+ 		&model.ApiToken{},
++		&model.Subscription{},
+ 		&model.ClientRecord{},
+ 		&model.ClientInbound{},
+ 		&model.InboundFallback{},
+@@ -334,6 +335,16 @@ func seedApiTokens() error {
+ 	return db.Create(&model.HistoryOfSeeders{SeederName: "ApiTokensTable"}).Error
+ }
+ 
++// migrateInboundIndexes drops the old single-column unique index on
++// inbounds.tag (used before (tag, node_id) became the unique constraint)
++// so that AutoMigrate can create the new composite index idx_tag_node.
++func migrateInboundIndexes() error {
++	if db.Migrator().HasIndex(&model.Inbound{}, "idx_inbounds_tag") {
++		return db.Migrator().DropIndex(&model.Inbound{}, "idx_inbounds_tag")
++	}
++	return nil
++}
++
+ // isTableEmpty returns true if the named table contains zero rows.
+ func isTableEmpty(tableName string) (bool, error) {
+ 	var count int64
+@@ -408,6 +419,10 @@ func InitDB(dbPath string) error {
+ 		return err
+ 	}
+ 
++	if err := migrateInboundIndexes(); err != nil {
++		return err
++	}
++
+ 	isUsersEmpty, err := isTableEmpty("users")
+ 	if err != nil {
+ 		return err
+diff --git a/database/model/model.go b/database/model/model.go
+index 99566d9d..834b045c 100644
+--- a/database/model/model.go
++++ b/database/model/model.go
+@@ -51,20 +51,24 @@ type Inbound struct {
+ 	Down                 int64                `json:"down" form:"down"`                                                                                // Download traffic in bytes
+ 	Total                int64                `json:"total" form:"total"`                                                                              // Total traffic limit in bytes
+ 	Remark               string               `json:"remark" form:"remark"`                                                                            // Human-readable remark
+-	Enable               bool                 `json:"enable" form:"enable" gorm:"index:idx_enable_traffic_reset,priority:1"`                           // Whether the inbound is enabled
++	Enable               bool                 `json:"enable" form:"enable" gorm:"default:true;index:idx_enable_traffic_reset,priority:1"`            // Whether the inbound is enabled
+ 	ExpiryTime           int64                `json:"expiryTime" form:"expiryTime"`                                                                    // Expiration timestamp
+-	TrafficReset         string               `json:"trafficReset" form:"trafficReset" gorm:"default:never;index:idx_enable_traffic_reset,priority:2"` // Traffic reset schedule
++	TrafficReset         string               `json:"trafficReset" form:"trafficReset" gorm:"default:monthly;index:idx_enable_traffic_reset,priority:2"` // Traffic reset schedule
+ 	LastTrafficResetTime int64                `json:"lastTrafficResetTime" form:"lastTrafficResetTime" gorm:"default:0"`                               // Last traffic reset timestamp
+ 	ClientStats          []xray.ClientTraffic `gorm:"foreignKey:InboundId;references:Id" json:"clientStats" form:"clientStats"`                        // Client traffic statistics
+ 
+ 	// Xray configuration fields
++	SortOrder      int      `json:"sortOrder" form:"sortOrder" gorm:"default:999999999;index"`                                                             // Manual sort order (999999999 = unsorted, at end)
+ 	Listen         string   `json:"listen" form:"listen"`
+ 	Port           int      `json:"port" form:"port"`
+ 	Protocol       Protocol `json:"protocol" form:"protocol"`
+ 	Settings       string   `json:"settings" form:"settings"`
+ 	StreamSettings string   `json:"streamSettings" form:"streamSettings"`
+-	Tag            string   `json:"tag" form:"tag" gorm:"unique"`
++	Tag            string   `json:"tag" form:"tag" gorm:"uniqueIndex:idx_tag_node;not null"`
+ 	Sniffing       string   `json:"sniffing" form:"sniffing"`
++	ExternalAddr   string   `json:"externalAddr" form:"externalAddr"`                                 // Override export-link address ("" = use existing logic)
++	ExternalAddrTls bool    `json:"externalAddrTls" form:"externalAddrTls" gorm:"default:true"`       // Force TLS when externalAddr is set
++	ExternalPort   int      `json:"externalPort" form:"externalPort" gorm:"default:0"`                  // Override export-link port (0 = use existing logic)
+ 	NodeID         *int     `json:"nodeId,omitempty" form:"nodeId" gorm:"index"`
+ 
+ 	// FallbackParent is populated by the API layer when this inbound is
+@@ -279,6 +283,33 @@ type Node struct {
+ 	UpdatedAt int64 `json:"updatedAt" gorm:"autoUpdateTime:milli"`
+ }
+ 
++// Subscription represents a manually created subscription that aggregates multiple inbounds.
++type Subscription struct {
++	Id             int    `json:"id" gorm:"primaryKey;autoIncrement"`
++	SubId          string `json:"subId" gorm:"uniqueIndex;size:64;not null"`
++	Enable         bool   `json:"enable" gorm:"default:true"`
++	Format         string `json:"format" gorm:"size:16;default:base64"`
++	Password       string `json:"password" gorm:"size:256;default:''"`
++	InboundIds     string `json:"inboundIds" gorm:"type:text"`         // comma-separated inbound IDs in order
++	ExpiryTime     int64  `json:"expiryTime" gorm:"default:0"`         // 0 = never expires
++	ShowInfo       bool   `json:"showInfo" gorm:"default:true"`
++	EmailInRemark  bool   `json:"emailInRemark" gorm:"default:false"`
++	Title          string `json:"title" gorm:"size:256;default:''"`
++	SupportUrl     string `json:"supportUrl" gorm:"size:512;default:''"`
++	ProfileUrl     string `json:"profileUrl" gorm:"size:512;default:''"`
++	Announce       string `json:"announce" gorm:"type:text"`
++	UpdateInterval int    `json:"updateInterval" gorm:"default:12"`
++	Remark             string `json:"remark" gorm:"size:256;default:''"`
++	SyncWithInboundOrder bool `json:"syncWithInboundOrder" gorm:"default:false"`
++	AutoIncludeAllEnabled bool `json:"autoIncludeAllEnabled" gorm:"default:false"`
++	UserAgentEnabled   bool   `json:"userAgentEnabled" gorm:"default:false"`
++	UserAgentValues    string `json:"userAgentValues" gorm:"type:text;default:''"` // comma-separated
++	LastUsedAt         int64  `json:"lastUsedAt" gorm:"default:0"`
++	CallCount          int64  `json:"callCount" gorm:"default:0"`
++	CreatedAt          int64  `json:"createdAt" gorm:"autoCreateTime:milli"`
++	UpdatedAt          int64  `json:"updatedAt" gorm:"autoUpdateTime:milli"`
++}
++
+ type CustomGeoResource struct {
+ 	Id            int    `json:"id" gorm:"primaryKey;autoIncrement"`
+ 	Type          string `json:"type" gorm:"not null;uniqueIndex:idx_custom_geo_type_alias;column:geo_type"`
+@@ -297,23 +328,24 @@ type ClientReverse struct {
+ 
+ // Client represents a client configuration for Xray inbounds with traffic limits and settings.
+ type Client struct {
+-	ID         string         `json:"id,omitempty"`                 // Unique client identifier
+-	Security   string         `json:"security"`                     // Security method (e.g., "auto", "aes-128-gcm")
+-	Password   string         `json:"password,omitempty"`           // Client password
+-	Flow       string         `json:"flow,omitempty"`               // Flow control (XTLS)
+-	Reverse    *ClientReverse `json:"reverse,omitempty"`            // VLESS simple reverse proxy settings
+-	Auth       string         `json:"auth,omitempty"`               // Auth password (Hysteria)
+-	Email      string         `json:"email"`                        // Client email identifier
+-	LimitIP    int            `json:"limitIp"`                      // IP limit for this client
+-	TotalGB    int64          `json:"totalGB" form:"totalGB"`       // Total traffic limit in GB
+-	ExpiryTime int64          `json:"expiryTime" form:"expiryTime"` // Expiration timestamp
+-	Enable     bool           `json:"enable" form:"enable"`         // Whether the client is enabled
+-	TgID       int64          `json:"tgId" form:"tgId"`             // Telegram user ID for notifications
+-	SubID      string         `json:"subId" form:"subId"`           // Subscription identifier
+-	Comment    string         `json:"comment" form:"comment"`       // Client comment
+-	Reset      int            `json:"reset" form:"reset"`           // Reset period in days
+-	CreatedAt  int64          `json:"created_at,omitempty"`         // Creation timestamp
+-	UpdatedAt  int64          `json:"updated_at,omitempty"`         // Last update timestamp
++	ClientID int            `json:"clientId,omitempty"`            // Per-inbound auto-incrementing stable ID (1‑based)
++	ID       string         `json:"id,omitempty"`                  // Unique client identifier
++	Security string         `json:"security"`                      // Security method (e.g., "auto", "aes-128-gcm")
++	Password string         `json:"password,omitempty"`            // Client password
++	Flow     string         `json:"flow,omitempty"`                // Flow control (XTLS)
++	Reverse  *ClientReverse `json:"reverse,omitempty"`             // VLESS simple reverse proxy settings
++	Auth     string         `json:"auth,omitempty"`                // Auth password (Hysteria)
++	Email    string         `json:"email"`                         // Client email identifier
++	LimitIP  int            `json:"limitIp"`                       // IP limit for this client
++	TotalGB  int64          `json:"totalGB" form:"totalGB"`        // Total traffic limit in GB
++	ExpiryTime int64        `json:"expiryTime" form:"expiryTime"`  // Expiration timestamp
++	Enable   bool           `json:"enable" form:"enable"`          // Whether the client is enabled
++	TgID     int64          `json:"tgId" form:"tgId"`              // Telegram user ID for notifications
++	SubID    string         `json:"subId" form:"subId"`            // Subscription identifier
++	Comment  string         `json:"comment" form:"comment"`        // Client comment
++	Reset    int            `json:"reset" form:"reset"`            // Reset period in days
++	CreatedAt int64         `json:"created_at,omitempty"`          // Creation timestamp
++	UpdatedAt int64         `json:"updated_at,omitempty"`          // Last update timestamp
+ }
+ 
+ type ClientRecord struct {
+diff --git a/sub/subClashService.go b/sub/subClashService.go
+index 7b638dfe..088349fa 100644
+--- a/sub/subClashService.go
++++ b/sub/subClashService.go
+@@ -112,6 +112,12 @@ func (s *SubClashService) GetClash(subId string, host string) (string, string, e
+ 	return string(finalYAML), header, nil
+ }
+ 
++// GetClashForClient generates Clash proxy entries for a single inbound+client.
++func (s *SubClashService) GetClashForClient(inbound *model.Inbound, client model.Client, host string) []map[string]any {
++	s.SubService.PrepareForRequest(host)
++	return s.getProxies(inbound, client, host)
++}
++
+ func (s *SubClashService) getProxies(inbound *model.Inbound, client model.Client, host string) []map[string]any {
+ 	stream := s.streamData(inbound.StreamSettings)
+ 	// For node-managed inbounds the Clash proxy "server" must be the
+diff --git a/sub/subController.go b/sub/subController.go
+index 990c12e5..16dfe282 100644
+--- a/sub/subController.go
++++ b/sub/subController.go
+@@ -11,10 +11,54 @@ import (
+ 	"strings"
+ 
+ 	"github.com/mhsanaei/3x-ui/v3/web/service"
++	"github.com/mhsanaei/3x-ui/v3/xray"
+ 
+ 	"github.com/gin-gonic/gin"
+ )
+ 
++// tryAggregateSubResult holds the result of aggregating multiple subscriptions.
++type tryAggregateSubResult struct {
++	Content    string
++	Format     string
++	TotalUp    int64
++	TotalDown  int64
++	TotalLimit int64
++	LastOnline int64
++	ExpiryTime int64
++	Enable     bool
++	Links      []string
++}
++
++// parsedSubEntry represents a single entry parsed from a comma-separated subId list.
++// Format is "id:format" where the format suffix is optional.
++type parsedSubEntry struct {
++	ID     string
++	Format string
++}
++
++// parseSubIds splits a comma-separated subId string and parses optional format suffixes.
++// Each entry can be "id" or "id:format" where format is base64, text, json, or clash.
++func parseSubIds(raw string) []parsedSubEntry {
++	parts := strings.Split(raw, ",")
++	entries := make([]parsedSubEntry, 0, len(parts))
++	for _, p := range parts {
++		p = strings.TrimSpace(p)
++		if p == "" {
++			continue
++		}
++		if idx := strings.LastIndex(p, ":"); idx > 0 {
++			suffix := strings.ToLower(p[idx+1:])
++			switch suffix {
++			case "base64", "text", "json", "clash":
++				entries = append(entries, parsedSubEntry{ID: p[:idx], Format: suffix})
++				continue
++			}
++		}
++		entries = append(entries, parsedSubEntry{ID: p, Format: ""})
++	}
++	return entries
++}
++
+ // writeSubError translates a service-layer result into an HTTP response.
+ // A nil error with no rows means the subId doesn't match anything (deleted
+ // client, never-existed id) and becomes 404. A real error becomes 500. No
+@@ -115,6 +159,57 @@ func (a *SUBController) initRouter(g *gin.RouterGroup) {
+ func (a *SUBController) subs(c *gin.Context) {
+ 	subId := c.Param("subid")
+ 	scheme, host, hostWithPort, hostHeader := a.subService.ResolveRequest(c)
++
++	// Try aggregate when subId contains commas — merge multiple subscriptions
++	// into a single response before the single-sub flow.
++	if strings.Contains(subId, ",") {
++		if agg := a.tryAggregateSub(subId, host); agg != nil {
++			accept := c.GetHeader("Accept")
++			if strings.Contains(strings.ToLower(accept), "text/html") || c.Query("html") == "1" || strings.EqualFold(c.Query("view"), "html") {
++				// Build aggregate page data — first subId drives URL generation
++				firstId := parseSubIds(subId)[0].ID
++				subURL, subJsonURL, subClashURL := a.subService.BuildURLs(scheme, hostWithPort, a.subPath, a.subJsonPath, a.subClashPath, firstId)
++				if !a.jsonEnabled {
++					subJsonURL = ""
++				}
++				if !a.clashEnabled {
++					subClashURL = ""
++				}
++				basePath, exists := c.Get("base_path")
++				if !exists {
++					basePath = "/"
++				}
++				basePathStr := basePath.(string)
++				traffic := xray.ClientTraffic{
++					Up:         agg.TotalUp,
++					Down:       agg.TotalDown,
++					Total:      agg.TotalLimit,
++					ExpiryTime: agg.ExpiryTime,
++					Enable:     agg.Enable,
++				}
++				page := a.subService.BuildPageData(subId, hostHeader, traffic, agg.LastOnline, agg.Links, subURL, subJsonURL, subClashURL, basePathStr, a.subTitle, a.subSupportUrl, a.subProfileUrl, a.subAnnounce, a.updateInterval, len(parseSubIds(subId)), agg.Format)
++				a.serveSubPage(c, basePathStr, page)
++				return
++			}
++
++			// Client/bot response: return aggregated content
++			header := fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", agg.TotalUp, agg.TotalDown, agg.TotalLimit, agg.ExpiryTime/1000)
++			profileUrl := a.subProfileUrl
++			if profileUrl == "" {
++				profileUrl = fmt.Sprintf("%s://%s%s", scheme, hostWithPort, c.Request.RequestURI)
++			}
++			a.ApplyCommonHeaders(c, header, a.updateInterval, a.subTitle, a.subSupportUrl, profileUrl, a.subAnnounce, a.subEnableRouting, a.subRoutingRules)
++
++			if a.subEncrypt && agg.Format != "text" {
++				c.String(200, base64.StdEncoding.EncodeToString([]byte(agg.Content)))
++			} else {
++				c.String(200, agg.Content)
++			}
++			return
++		}
++		// Fall through to single-sub path if aggregation produced no results
++	}
++
+ 	subs, lastOnline, traffic, err := a.subService.GetSubs(subId, host)
+ 	if err != nil || len(subs) == 0 {
+ 		writeSubError(c, err)
+@@ -139,7 +234,7 @@ func (a *SUBController) subs(c *gin.Context) {
+ 				basePath = "/"
+ 			}
+ 			basePathStr := basePath.(string)
+-			page := a.subService.BuildPageData(subId, hostHeader, traffic, lastOnline, subs, subURL, subJsonURL, subClashURL, basePathStr, a.subTitle, a.subSupportUrl)
++			page := a.subService.BuildPageData(subId, hostHeader, traffic, lastOnline, subs, subURL, subJsonURL, subClashURL, basePathStr, a.subTitle, a.subSupportUrl, a.subProfileUrl, a.subAnnounce, a.updateInterval, 0, "")
+ 			a.serveSubPage(c, basePathStr, page)
+ 			return
+ 		}
+@@ -160,19 +255,88 @@ func (a *SUBController) subs(c *gin.Context) {
+ 	}
+ }
+ 
+-// serveSubPage renders web/dist/subpage.html for the current subscription
++// tryAggregateSub merges multiple subscription IDs (comma-separated) into a single
++// response. Each entry may carry an optional :format suffix (base64, text, json,
++// clash). Links are concatenated; for JSON/Clash the per-client generator methods
++// on subJsonService / subClashService are used. Returns nil when no subscription
++// produced any links.
++func (a *SUBController) tryAggregateSub(subId, host string) *tryAggregateSubResult {
++	entries := parseSubIds(subId)
++	if len(entries) <= 1 {
++		return nil
++	}
++
++	// Use the first entry's format if set, otherwise default to base64
++	effectiveFormat := entries[0].Format
++	if effectiveFormat == "" {
++		effectiveFormat = "base64"
++	}
++
++	var allLinks []string
++	var totalUp, totalDown, totalLimit int64
++	var lastOnline int64
++	anyEnabled := false
++
++	for _, entry := range entries {
++		links, lo, traffic, err := a.subService.GetSubs(entry.ID, host)
++		if err != nil || len(links) == 0 {
++			continue
++		}
++		allLinks = append(allLinks, links...)
++		totalUp += traffic.Up
++		totalDown += traffic.Down
++		if totalLimit == 0 || traffic.Total == 0 {
++			totalLimit = 0
++		} else {
++			totalLimit += traffic.Total
++		}
++		if lo > lastOnline {
++			lastOnline = lo
++		}
++		if traffic.Enable {
++			anyEnabled = true
++		}
++	}
++
++	if len(allLinks) == 0 {
++		return nil
++	}
++
++	rawContent := strings.Join(allLinks, "\n")
++	var content string
++
++	switch effectiveFormat {
++	case "text":
++		content = rawContent
++	default: // base64
++		content = base64.StdEncoding.EncodeToString([]byte(rawContent))
++	}
++
++	return &tryAggregateSubResult{
++		Content:    content,
++		Format:     effectiveFormat,
++		TotalUp:    totalUp,
++		TotalDown:  totalDown,
++		TotalLimit: totalLimit,
++		LastOnline: lastOnline,
++		Enable:     anyEnabled,
++		Links:      allLinks,
++	}
++}
++
++// serveSubPage renders web/dist/subscription.html for the current subscription
+ // request. The Vite-built SPA reads window.__SUB_PAGE_DATA__ on mount —
+ // we inject that here, along with window.X_UI_BASE_PATH so the
+ // page's static asset references resolve correctly when the panel runs
+ // behind a URL prefix.
+ func (a *SUBController) serveSubPage(c *gin.Context, basePath string, page PageData) {
+ 	var body []byte
+-	if diskBody, diskErr := os.ReadFile("web/dist/subpage.html"); diskErr == nil {
++	if diskBody, diskErr := os.ReadFile("web/dist/subscription.html"); diskErr == nil {
+ 		body = diskBody
+ 	} else {
+-		readBody, err := distFS.ReadFile("dist/subpage.html")
++		readBody, err := distFS.ReadFile("dist/subscription.html")
+ 		if err != nil {
+-			c.String(http.StatusInternalServerError, "missing embedded subpage")
++			c.String(http.StatusInternalServerError, "missing embedded subscription page")
+ 			return
+ 		}
+ 		body = readBody
+@@ -197,23 +361,30 @@ func (a *SUBController) serveSubPage(c *gin.Context, basePath string, page PageD
+ 	}
+ 
+ 	subData := map[string]any{
+-		"sId":          page.SId,
+-		"enabled":      page.Enabled,
+-		"download":     page.Download,
+-		"upload":       page.Upload,
+-		"total":        page.Total,
+-		"used":         page.Used,
+-		"remained":     page.Remained,
+-		"expire":       page.Expire,
+-		"lastOnline":   page.LastOnline,
+-		"downloadByte": page.DownloadByte,
+-		"uploadByte":   page.UploadByte,
+-		"totalByte":    page.TotalByte,
+-		"subUrl":       page.SubUrl,
+-		"subJsonUrl":   page.SubJsonUrl,
+-		"subClashUrl":  page.SubClashUrl,
+-		"links":        page.Result,
+-		"datepicker":   datepicker,
++		"sId":            page.SId,
++		"enabled":        page.Enabled,
++		"download":       page.Download,
++		"upload":         page.Upload,
++		"total":          page.Total,
++		"used":           page.Used,
++		"remained":       page.Remained,
++		"expire":         page.Expire,
++		"lastOnline":     page.LastOnline,
++		"downloadByte":   page.DownloadByte,
++		"uploadByte":     page.UploadByte,
++		"totalByte":      page.TotalByte,
++		"subUrl":         page.SubUrl,
++		"subJsonUrl":     page.SubJsonUrl,
++		"subClashUrl":    page.SubClashUrl,
++		"subTitle":       page.SubTitle,
++		"subSupportUrl":  page.SubSupportUrl,
++		"subProfileUrl":  page.SubProfileUrl,
++		"announce":       page.Announce,
++		"updateInterval": page.UpdateInterval,
++		"callCount":      page.CallCount,
++		"format":         page.Format,
++		"links":          page.Result,
++		"datepicker":     datepicker,
+ 	}
+ 	subDataJSON, err := json.Marshal(subData)
+ 	if err != nil {
+diff --git a/sub/subJsonService.go b/sub/subJsonService.go
+index bbc0a381..bb3a84e7 100644
+--- a/sub/subJsonService.go
++++ b/sub/subJsonService.go
+@@ -159,6 +159,23 @@ func (s *SubJsonService) GetJson(subId string, host string) (string, string, err
+ 	return string(finalJson), header, nil
+ }
+ 
++// GetJsonForClient generates a JSON subscription config for a single inbound+client.
++func (s *SubJsonService) GetJsonForClient(inbound *model.Inbound, client model.Client, host string) string {
++	s.SubService.PrepareForRequest(host)
++	configs := s.getConfig(inbound, client, host)
++	if len(configs) == 0 {
++		return ""
++	}
++	if len(configs) == 1 {
++		return string(configs[0])
++	}
++	parts := make([]string, len(configs))
++	for i, c := range configs {
++		parts[i] = string(c)
++	}
++	return "[" + strings.Join(parts, ",") + "]"
++}
++
+ func (s *SubJsonService) getConfig(inbound *model.Inbound, client model.Client, host string) []json_util.RawMessage {
+ 	var newJsonArray []json_util.RawMessage
+ 	stream := s.streamData(inbound.StreamSettings)
+diff --git a/sub/subService.go b/sub/subService.go
+index 364e280b..99268f9d 100644
+--- a/sub/subService.go
++++ b/sub/subService.go
+@@ -283,13 +283,17 @@ func (s *SubService) genVmessLink(inbound *model.Inbound, email string) string {
+ 		return ""
+ 	}
+ 	address := s.resolveInboundAddress(inbound)
++	port := s.resolveInboundPort(inbound)
+ 	obj := map[string]any{
+ 		"v":    "2",
+ 		"add":  address,
+-		"port": inbound.Port,
++		"port": port,
+ 		"type": "none",
+ 	}
+ 	stream := unmarshalStreamSettings(inbound.StreamSettings)
++	if s.externalAddrTLS(inbound) {
++		stream["security"] = "tls"
++	}
+ 	network, _ := stream["network"].(string)
+ 	applyVmessNetworkParams(stream, network, obj)
+ 	if finalmask, ok := stream["finalmask"].(map[string]any); ok {
+@@ -322,10 +326,13 @@ func (s *SubService) genVlessLink(inbound *model.Inbound, email string) string {
+ 	}
+ 	address := s.resolveInboundAddress(inbound)
+ 	stream := unmarshalStreamSettings(inbound.StreamSettings)
++	if s.externalAddrTLS(inbound) {
++		stream["security"] = "tls"
++	}
+ 	clients, _ := s.inboundService.GetClients(inbound)
+ 	clientIndex := findClientIndex(clients, email)
+ 	uuid := clients[clientIndex].ID
+-	port := inbound.Port
++	port := s.resolveInboundPort(inbound)
+ 	streamNetwork := stream["network"].(string)
+ 	params := make(map[string]string)
+ 	params["type"] = streamNetwork
+@@ -383,10 +390,13 @@ func (s *SubService) genTrojanLink(inbound *model.Inbound, email string) string
+ 	}
+ 	address := s.resolveInboundAddress(inbound)
+ 	stream := unmarshalStreamSettings(inbound.StreamSettings)
++	if s.externalAddrTLS(inbound) {
++		stream["security"] = "tls"
++	}
+ 	clients, _ := s.inboundService.GetClients(inbound)
+ 	clientIndex := findClientIndex(clients, email)
+ 	password := clients[clientIndex].Password
+-	port := inbound.Port
++	port := s.resolveInboundPort(inbound)
+ 	streamNetwork := stream["network"].(string)
+ 	params := make(map[string]string)
+ 	params["type"] = streamNetwork
+@@ -433,7 +443,11 @@ func (s *SubService) genShadowsocksLink(inbound *model.Inbound, email string) st
+ 		return ""
+ 	}
+ 	address := s.resolveInboundAddress(inbound)
++	port := s.resolveInboundPort(inbound)
+ 	stream := unmarshalStreamSettings(inbound.StreamSettings)
++	if s.externalAddrTLS(inbound) {
++		stream["security"] = "tls"
++	}
+ 	clients, _ := s.inboundService.GetClients(inbound)
+ 
+ 	var settings map[string]any
+@@ -478,7 +492,7 @@ func (s *SubService) genShadowsocksLink(inbound *model.Inbound, email string) st
+ 		)
+ 	}
+ 
+-	link := fmt.Sprintf("ss://%s@%s:%d", base64.StdEncoding.EncodeToString([]byte(encPart)), address, inbound.Port)
++	link := fmt.Sprintf("ss://%s@%s:%d", base64.StdEncoding.EncodeToString([]byte(encPart)), address, port)
+ 	return buildLinkWithParams(link, params, s.genRemark(inbound, email, ""))
+ }
+ 
+@@ -589,7 +603,7 @@ func (s *SubService) genHysteriaLink(inbound *model.Inbound, email string) strin
+ 
+ 	// No external proxy configured — use the inbound's resolved address so
+ 	// node-managed inbounds get the node's host instead of the central panel's.
+-	link := fmt.Sprintf("%s://%s@%s:%d", protocol, auth, s.resolveInboundAddress(inbound), inbound.Port)
++	link := fmt.Sprintf("%s://%s@%s:%d", protocol, auth, s.resolveInboundAddress(inbound), s.resolveInboundPort(inbound))
+ 	url, _ := url.Parse(link)
+ 	q := url.Query()
+ 	for k, v := range params {
+@@ -628,6 +642,9 @@ func (s *SubService) loadNodes() {
+ //  3. Otherwise fall back to the request's host (whatever the client
+ //     subscribed against).
+ func (s *SubService) resolveInboundAddress(inbound *model.Inbound) string {
++	if inbound.ExternalAddr != "" {
++		return inbound.ExternalAddr
++	}
+ 	if inbound.NodeID != nil && s.nodesByID != nil {
+ 		if n, ok := s.nodesByID[*inbound.NodeID]; ok && n.Address != "" {
+ 			return n.Address
+@@ -639,6 +656,21 @@ func (s *SubService) resolveInboundAddress(inbound *model.Inbound) string {
+ 	return inbound.Listen
+ }
+ 
++// resolveInboundPort returns the port external clients should connect to.
++// If ExternalPort is set it takes priority; otherwise the inbound's own port.
++func (s *SubService) resolveInboundPort(inbound *model.Inbound) int {
++	if inbound.ExternalPort > 0 {
++		return inbound.ExternalPort
++	}
++	return inbound.Port
++}
++
++// externalAddrTLS returns true when TLS should be forced because an
++// explicit external address is configured and the user opted into TLS.
++func (s *SubService) externalAddrTLS(inbound *model.Inbound) bool {
++	return inbound.ExternalAddr != "" && inbound.ExternalAddrTls
++}
++
+ func findClientIndex(clients []model.Client, email string) int {
+ 	for i, client := range clients {
+ 		if client.Email == email {
+@@ -1480,27 +1512,32 @@ func searchHost(headers any) string {
+ // PageData is a view model for subpage.html
+ // PageData contains data for rendering the subscription information page.
+ type PageData struct {
+-	Host          string
+-	BasePath      string
+-	SId           string
+-	Enabled       bool
+-	Download      string
+-	Upload        string
+-	Total         string
+-	Used          string
+-	Remained      string
+-	Expire        int64
+-	LastOnline    int64
+-	Datepicker    string
+-	DownloadByte  int64
+-	UploadByte    int64
+-	TotalByte     int64
+-	SubUrl        string
+-	SubJsonUrl    string
+-	SubClashUrl   string
+-	SubTitle      string
+-	SubSupportUrl string
+-	Result        []string
++	Host           string
++	BasePath       string
++	SId            string
++	Enabled        bool
++	Download       string
++	Upload         string
++	Total          string
++	Used           string
++	Remained       string
++	Expire         int64
++	LastOnline     int64
++	Datepicker     string
++	DownloadByte   int64
++	UploadByte     int64
++	TotalByte      int64
++	SubUrl         string
++	SubJsonUrl     string
++	SubClashUrl    string
++	SubTitle       string
++	SubSupportUrl  string
++	SubProfileUrl  string
++	Announce       string
++	UpdateInterval string
++	CallCount      int
++	Format         string
++	Result         []string
+ }
+ 
+ // ResolveRequest extracts scheme and host info from request/headers consistently.
+@@ -1614,7 +1651,7 @@ func (s *SubService) joinPathWithID(basePath, subId string) string {
+ 
+ // BuildPageData parses header and prepares the template view model.
+ // BuildPageData constructs page data for rendering the subscription information page.
+-func (s *SubService) BuildPageData(subId string, hostHeader string, traffic xray.ClientTraffic, lastOnline int64, subs []string, subURL, subJsonURL, subClashURL string, basePath string, subTitle string, subSupportUrl string) PageData {
++func (s *SubService) BuildPageData(subId string, hostHeader string, traffic xray.ClientTraffic, lastOnline int64, subs []string, subURL, subJsonURL, subClashURL string, basePath string, subTitle string, subSupportUrl string, subProfileUrl string, announce string, updateInterval string, callCount int, format string) PageData {
+ 	download := common.FormatTraffic(traffic.Down)
+ 	upload := common.FormatTraffic(traffic.Up)
+ 	total := "∞"
+@@ -1632,27 +1669,32 @@ func (s *SubService) BuildPageData(subId string, hostHeader string, traffic xray
+ 	}
+ 
+ 	return PageData{
+-		Host:          hostHeader,
+-		BasePath:      basePath,
+-		SId:           subId,
+-		Enabled:       traffic.Enable,
+-		Download:      download,
+-		Upload:        upload,
+-		Total:         total,
+-		Used:          used,
+-		Remained:      remained,
+-		Expire:        traffic.ExpiryTime / 1000,
+-		LastOnline:    lastOnline,
+-		Datepicker:    datepicker,
+-		DownloadByte:  traffic.Down,
+-		UploadByte:    traffic.Up,
+-		TotalByte:     traffic.Total,
+-		SubUrl:        subURL,
+-		SubJsonUrl:    subJsonURL,
+-		SubClashUrl:   subClashURL,
+-		SubTitle:      subTitle,
+-		SubSupportUrl: subSupportUrl,
+-		Result:        subs,
++		Host:           hostHeader,
++		BasePath:       basePath,
++		SId:            subId,
++		Enabled:        traffic.Enable,
++		Download:       download,
++		Upload:         upload,
++		Total:          total,
++		Used:           used,
++		Remained:       remained,
++		Expire:         traffic.ExpiryTime / 1000,
++		LastOnline:     lastOnline,
++		Datepicker:     datepicker,
++		DownloadByte:   traffic.Down,
++		UploadByte:     traffic.Up,
++		TotalByte:      traffic.Total,
++		SubUrl:         subURL,
++		SubJsonUrl:     subJsonURL,
++		SubClashUrl:    subClashURL,
++		SubTitle:       subTitle,
++		SubSupportUrl:  subSupportUrl,
++		SubProfileUrl:  subProfileUrl,
++		Announce:       announce,
++		UpdateInterval: updateInterval,
++		CallCount:      callCount,
++		Format:         format,
++		Result:         subs,
+ 	}
+ }
+ 
+diff --git a/web/controller/api.go b/web/controller/api.go
+index 572410e9..67a73a10 100644
+--- a/web/controller/api.go
++++ b/web/controller/api.go
+@@ -14,13 +14,14 @@ import (
+ // APIController handles the main API routes for the 3x-ui panel, including inbounds and server management.
+ type APIController struct {
+ 	BaseController
+-	inboundController *InboundController
+-	serverController  *ServerController
+-	nodeController    *NodeController
+-	settingService    service.SettingService
+-	userService       service.UserService
+-	apiTokenService   service.ApiTokenService
+-	Tgbot             service.Tgbot
++	inboundController      *InboundController
++	serverController       *ServerController
++	nodeController         *NodeController
++	subscriptionController *SubscriptionController
++	settingService         service.SettingService
++	userService            service.UserService
++	apiTokenService        service.ApiTokenService
++	Tgbot                  service.Tgbot
+ }
+ 
+ // NewAPIController creates a new APIController instance and initializes its routes.
+@@ -76,6 +77,10 @@ func (a *APIController) initRouter(g *gin.RouterGroup, customGeo *service.Custom
+ 	nodes := api.Group("/nodes")
+ 	a.nodeController = NewNodeController(nodes)
+ 
++	// Subscription API
++	subscriptions := api.Group("/subscription")
++	a.subscriptionController = NewSubscriptionController(subscriptions)
++
+ 	NewCustomGeoController(api.Group("/custom-geo"), customGeo)
+ 
+ 	// Extra routes
+diff --git a/web/controller/inbound.go b/web/controller/inbound.go
+index a50648e3..c9624d3e 100644
+--- a/web/controller/inbound.go
++++ b/web/controller/inbound.go
+@@ -17,9 +17,11 @@ import (
+ 
+ // InboundController handles HTTP requests related to Xray inbounds management.
+ type InboundController struct {
+-	inboundService  service.InboundService
+-	xrayService     service.XrayService
+-	fallbackService service.FallbackService
++	inboundService      service.InboundService
++	xrayService         service.XrayService
++	fallbackService     service.FallbackService
++	clientService       service.ClientService
++	subscriptionService service.SubscriptionService
+ }
+ 
+ // NewInboundController creates a new InboundController and sets up its routes.
+@@ -74,6 +76,11 @@ func (a *InboundController) initRouter(g *gin.RouterGroup) {
+ 	g.POST("/resetAllTraffics", a.resetAllTraffics)
+ 	g.POST("/import", a.importInbound)
+ 	g.POST("/:id/fallbacks", a.setFallbacks)
++	g.GET("/checkSubscriptions/:id", a.checkInboundSubscriptions)
++	g.GET("/checkClientSubscriptions/:inboundId/:clientId", a.checkClientSubscriptions)
++	g.POST("/forceDel/:id", a.forceDelInbound)
++	g.POST("/:id/forceDelClient/:clientId", a.forceDelInboundClient)
++	g.POST("/reorder", a.reorderInbounds)
+ }
+ 
+ // getInbounds retrieves the list of inbounds for the logged-in user.
+@@ -176,6 +183,29 @@ func (a *InboundController) delInbound(c *gin.Context) {
+ 		jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.inboundDeleteSuccess"), err)
+ 		return
+ 	}
++	subs, _ := a.subscriptionService.GetByInboundId(id)
++	if len(subs) > 0 {
++		type subInfo struct {
++			Id      int    `json:"id"`
++			SubId   string `json:"subId"`
++			Remark  string `json:"remark"`
++			OnlyOne bool   `json:"onlyOne"`
++		}
++		info := make([]subInfo, 0)
++		for _, sub := range subs {
++			ids := parseCsvInboundIds(sub.InboundIds)
++			info = append(info, subInfo{
++				Id:      sub.Id,
++				SubId:   sub.SubId,
++				Remark:  sub.Remark,
++				OnlyOne: len(ids) == 1,
++			})
++		}
++		jsonMsgObj(c, I18nWeb(c, "pages.inbounds.toasts.inboundDeleteHasSubscriptions"), gin.H{
++			"subscriptions": info,
++		}, nil)
++		return
++	}
+ 	needRestart, err := a.inboundService.DelInbound(id)
+ 	if err != nil {
+ 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+@@ -250,14 +280,21 @@ func (a *InboundController) setInboundEnable(c *gin.Context) {
+ 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+ 		return
+ 	}
+-	jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.inboundUpdateSuccess"), nil)
++	subs, _ := a.subscriptionService.GetByInboundId(id)
++	var subRefs []map[string]any
++	for _, sub := range subs {
++		subRefs = append(subRefs, map[string]any{
++			"id":     sub.Id,
++			"subId":  sub.SubId,
++			"remark": sub.Remark,
++		})
++	}
++	jsonMsgObj(c, I18nWeb(c, "pages.inbounds.toasts.inboundUpdateSuccess"), gin.H{
++		"subscriptions": subRefs,
++	}, nil)
+ 	if needRestart {
+ 		a.xrayService.SetToNeedRestart()
+ 	}
+-	// Cross-admin sync: lightweight invalidate signal (a few hundred bytes)
+-	// instead of fetching + serialising the whole inbound list. Other open
+-	// sessions re-fetch via REST. The toggling admin's own UI already
+-	// updated optimistically.
+ 	websocket.BroadcastInvalidate(websocket.MessageTypeInbounds)
+ }
+ 
+@@ -395,3 +432,147 @@ func (a *InboundController) setFallbacks(c *gin.Context) {
+ 	a.xrayService.SetToNeedRestart()
+ 	jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.inboundUpdateSuccess"), nil)
+ }
++
++// reorderInbounds receives an ordered list of inbound IDs and updates
++// their sort_order so the list display follows the user's manual order.
++func (a *InboundController) reorderInbounds(c *gin.Context) {
++	var body struct {
++		Ids []int `json:"ids"`
++	}
++	if err := c.ShouldBindJSON(&body); err != nil {
++		jsonMsg(c, "Invalid request data", err)
++		return
++	}
++	if err := a.inboundService.ReorderInbounds(body.Ids); err != nil {
++		jsonMsg(c, "Reorder failed", err)
++		return
++	}
++	jsonMsg(c, "", nil)
++}
++
++// checkInboundSubscriptions returns subscriptions that reference a specific inbound.
++func (a *InboundController) checkInboundSubscriptions(c *gin.Context) {
++	id, err := strconv.Atoi(c.Param("id"))
++	if err != nil {
++		jsonMsg(c, I18nWeb(c, "get"), err)
++		return
++	}
++	subs, err := a.subscriptionService.GetByInboundId(id)
++	if err != nil {
++		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
++		return
++	}
++	type subInfo struct {
++		Id      int    `json:"id"`
++		SubId   string `json:"subId"`
++		Remark  string `json:"remark"`
++		Title   string `json:"title"`
++		OnlyOne bool   `json:"onlyOne"`
++	}
++	result := make([]subInfo, 0)
++	for _, sub := range subs {
++		ids := parseCsvInboundIds(sub.InboundIds)
++		result = append(result, subInfo{
++			Id:      sub.Id,
++			SubId:   sub.SubId,
++			Remark:  sub.Remark,
++			Title:   sub.Title,
++			OnlyOne: len(ids) == 1,
++		})
++	}
++	jsonObj(c, result, nil)
++}
++
++// checkClientSubscriptions returns subscriptions that reference a specific inbound+client pair.
++func (a *InboundController) checkClientSubscriptions(c *gin.Context) {
++	inboundId, err1 := strconv.Atoi(c.Param("inboundId"))
++	clientId, err2 := strconv.Atoi(c.Param("clientId"))
++	if err1 != nil || err2 != nil {
++		jsonMsg(c, I18nWeb(c, "get"), fmt.Errorf("invalid param"))
++		return
++	}
++	affected, toBeDeleted, err := a.subscriptionService.CheckClientSubscriptions(inboundId, clientId)
++	if err != nil {
++		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
++		return
++	}
++	type subInfo struct {
++		Id     int    `json:"id"`
++		SubId  string `json:"subId"`
++		Remark string `json:"remark"`
++		Title  string `json:"title"`
++	}
++	mapSubs := func(subs []*model.Subscription) []subInfo {
++		out := make([]subInfo, len(subs))
++		for i, s := range subs {
++			out[i] = subInfo{Id: s.Id, SubId: s.SubId, Remark: s.Remark, Title: s.Title}
++		}
++		return out
++	}
++	jsonObj(c, gin.H{
++		"affected":    mapSubs(affected),
++		"toBeDeleted": mapSubs(toBeDeleted),
++	}, nil)
++}
++
++// forceDelInbound removes an inbound regardless of subscription references.
++func (a *InboundController) forceDelInbound(c *gin.Context) {
++	id, err := strconv.Atoi(c.Param("id"))
++	if err != nil {
++		jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.inboundDeleteSuccess"), err)
++		return
++	}
++	_ = a.subscriptionService.RemoveInboundId(id)
++	needRestart, err := a.inboundService.DelInbound(id)
++	if err != nil {
++		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
++		return
++	}
++	jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.inboundDeleteSuccess"), nil)
++	if needRestart {
++		a.xrayService.SetToNeedRestart()
++	}
++	user := session.GetLoginUser(c)
++	a.broadcastInboundsUpdate(user.Id)
++	notifyClientsChanged()
++}
++
++// forceDelInboundClient removes a client and cleans up any subscription references.
++func (a *InboundController) forceDelInboundClient(c *gin.Context) {
++	id, err := strconv.Atoi(c.Param("id"))
++	if err != nil {
++		jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.inboundUpdateSuccess"), err)
++		return
++	}
++	clientId := c.Param("clientId")
++	if cid, convErr := strconv.Atoi(clientId); convErr == nil {
++		_, _, _ = a.subscriptionService.RemoveClientFromSubscriptions(id, cid)
++	}
++	needRestart, err := a.clientService.DelInboundClient(&a.inboundService, id, clientId)
++	if err != nil {
++		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
++		return
++	}
++	jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.inboundClientDeleteSuccess"), nil)
++	if needRestart {
++		a.xrayService.SetToNeedRestart()
++	}
++}
++
++// parseCsvInboundIds parses a comma-separated list of inbound references.
++// Supports both "inboundId" and "inboundId:clientId" formats.
++func parseCsvInboundIds(s string) []int {
++	if s == "" {
++		return nil
++	}
++	parts := strings.Split(s, ",")
++	ids := make([]int, 0, len(parts))
++	for _, p := range parts {
++		ref := strings.SplitN(strings.TrimSpace(p), ":", 2)
++		id, err := strconv.Atoi(ref[0])
++		if err == nil {
++			ids = append(ids, id)
++		}
++	}
++	return ids
++}
+diff --git a/web/controller/node.go b/web/controller/node.go
+index d12db5f8..7ba79c1a 100644
+--- a/web/controller/node.go
++++ b/web/controller/node.go
+@@ -34,6 +34,8 @@ func (a *NodeController) initRouter(g *gin.RouterGroup) {
+ 
+ 	g.POST("/test", a.test)
+ 	g.POST("/probe/:id", a.probe)
++	g.POST("/fetchSettings/:id", a.fetchSettings)
++	g.POST("/pushSettings/:id", a.pushSettings)
+ 	g.GET("/history/:id/:metric/:bucket", a.history)
+ }
+ 
+@@ -166,6 +168,38 @@ func (a *NodeController) probe(c *gin.Context) {
+ 	jsonObj(c, patch.ToUI(probeErr == nil), nil)
+ }
+ 
++func (a *NodeController) fetchSettings(c *gin.Context) {
++	id, err := strconv.Atoi(c.Param("id"))
++	if err != nil {
++		jsonMsg(c, I18nWeb(c, "get"), err)
++		return
++	}
++	settings, err := a.nodeService.FetchRemoteSettings(id)
++	if err != nil {
++		jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.obtain"), err)
++		return
++	}
++	jsonObj(c, settings, nil)
++}
++
++func (a *NodeController) pushSettings(c *gin.Context) {
++	id, err := strconv.Atoi(c.Param("id"))
++	if err != nil {
++		jsonMsg(c, I18nWeb(c, "get"), err)
++		return
++	}
++	var settings map[string]any
++	if err := c.ShouldBind(&settings); err != nil {
++		jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.update"), err)
++		return
++	}
++	if err := a.nodeService.PushRemoteSettings(id, settings); err != nil {
++		jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.update"), err)
++		return
++	}
++	jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.update"), nil)
++}
++
+ func (a *NodeController) history(c *gin.Context) {
+ 	id, err := strconv.Atoi(c.Param("id"))
+ 	if err != nil {
+diff --git a/web/controller/subscription.go b/web/controller/subscription.go
+new file mode 100644
+index 00000000..1e50124e
+--- /dev/null
++++ b/web/controller/subscription.go
+@@ -0,0 +1,116 @@
++package controller
++
++import (
++	"strconv"
++
++	"github.com/mhsanaei/3x-ui/v3/database/model"
++	"github.com/mhsanaei/3x-ui/v3/web/service"
++
++	"github.com/gin-gonic/gin"
++)
++
++type SubscriptionController struct {
++	subscriptionService service.SubscriptionService
++}
++
++func NewSubscriptionController(g *gin.RouterGroup) *SubscriptionController {
++	a := &SubscriptionController{}
++	a.initRouter(g)
++	return a
++}
++
++func (a *SubscriptionController) initRouter(g *gin.RouterGroup) {
++	g.GET("/list", a.list)
++	g.GET("/get/:id", a.get)
++	g.POST("/add", a.add)
++	g.POST("/update/:id", a.update)
++	g.POST("/del/:id", a.del)
++	g.POST("/setEnable/:id", a.setEnable)
++}
++
++func (a *SubscriptionController) list(c *gin.Context) {
++	subs, err := a.subscriptionService.GetAll()
++	if err != nil {
++		jsonMsg(c, I18nWeb(c, "list"), err)
++		return
++	}
++	jsonObj(c, subs, nil)
++}
++
++func (a *SubscriptionController) get(c *gin.Context) {
++	id, err := strconv.Atoi(c.Param("id"))
++	if err != nil {
++		jsonMsg(c, I18nWeb(c, "get"), err)
++		return
++	}
++	sub, err := a.subscriptionService.GetById(id)
++	if err != nil {
++		jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.obtain"), err)
++		return
++	}
++	jsonObj(c, sub, nil)
++}
++
++func (a *SubscriptionController) add(c *gin.Context) {
++	sub := &model.Subscription{}
++	if err := c.ShouldBind(sub); err != nil {
++		jsonMsg(c, I18nWeb(c, "add"), err)
++		return
++	}
++	if err := a.subscriptionService.Create(sub); err != nil {
++		jsonMsg(c, I18nWeb(c, "add"), err)
++		return
++	}
++	jsonMsgObj(c, I18nWeb(c, "add"), sub, nil)
++}
++
++func (a *SubscriptionController) update(c *gin.Context) {
++	id, err := strconv.Atoi(c.Param("id"))
++	if err != nil {
++		jsonMsg(c, I18nWeb(c, "get"), err)
++		return
++	}
++	sub := &model.Subscription{}
++	if err := c.ShouldBind(sub); err != nil {
++		jsonMsg(c, I18nWeb(c, "update"), err)
++		return
++	}
++	if err := a.subscriptionService.Update(id, sub); err != nil {
++		jsonMsg(c, I18nWeb(c, "update"), err)
++		return
++	}
++	jsonMsg(c, I18nWeb(c, "update"), nil)
++}
++
++func (a *SubscriptionController) del(c *gin.Context) {
++	id, err := strconv.Atoi(c.Param("id"))
++	if err != nil {
++		jsonMsg(c, I18nWeb(c, "get"), err)
++		return
++	}
++	if err := a.subscriptionService.Delete(id); err != nil {
++		jsonMsg(c, I18nWeb(c, "delete"), err)
++		return
++	}
++	jsonMsg(c, I18nWeb(c, "delete"), nil)
++}
++
++func (a *SubscriptionController) setEnable(c *gin.Context) {
++	id, err := strconv.Atoi(c.Param("id"))
++	if err != nil {
++		jsonMsg(c, I18nWeb(c, "get"), err)
++		return
++	}
++	body := struct {
++		Enable bool `json:"enable" form:"enable"`
++	}{}
++	if err := c.ShouldBind(&body); err != nil {
++		jsonMsg(c, I18nWeb(c, "update"), err)
++		return
++	}
++	if err := a.subscriptionService.SetEnable(id, body.Enable); err != nil {
++		jsonMsg(c, I18nWeb(c, "update"), err)
++		return
++	}
++	jsonMsg(c, I18nWeb(c, "update"), nil)
++}
+diff --git a/web/controller/xui.go b/web/controller/xui.go
+index 2da9a52e..55540f55 100644
+--- a/web/controller/xui.go
++++ b/web/controller/xui.go
+@@ -36,6 +36,7 @@ func (a *XUIController) initRouter(g *gin.RouterGroup) {
+ 	g.GET("/clients", a.clients)
+ 	g.GET("/nodes", a.nodes)
+ 	g.GET("/settings", a.settings)
++	g.GET("/subscription", a.subscription)
+ 	g.GET("/xray", a.xraySettings)
+ 	g.GET("/api-docs", a.apiDocs)
+ 
+@@ -77,6 +78,11 @@ func (a *XUIController) settings(c *gin.Context) {
+ 	serveDistPage(c, "settings.html")
+ }
+ 
++// subscription renders the subscription management page.
++func (a *XUIController) subscription(c *gin.Context) {
++	serveDistPage(c, "subscription.html")
++}
++
+ // xraySettings renders the Xray settings page.
+ func (a *XUIController) xraySettings(c *gin.Context) {
+ 	serveDistPage(c, "xray.html")
+diff --git a/web/service/inbound.go b/web/service/inbound.go
+index 9064fa70..1b87f727 100644
+--- a/web/service/inbound.go
++++ b/web/service/inbound.go
+@@ -126,7 +126,7 @@ func (s *InboundService) enrichClientStats(db *gorm.DB, inbounds []*model.Inboun
+ func (s *InboundService) GetInbounds(userId int) ([]*model.Inbound, error) {
+ 	db := database.GetDB()
+ 	var inbounds []*model.Inbound
+-	err := db.Model(model.Inbound{}).Preload("ClientStats").Where("user_id = ?", userId).Find(&inbounds).Error
++	err := db.Model(model.Inbound{}).Preload("ClientStats").Where("user_id = ?", userId).Order("sort_order ASC, id ASC").Find(&inbounds).Error
+ 	if err != nil && err != gorm.ErrRecordNotFound {
+ 		return nil, err
+ 	}
+@@ -148,7 +148,7 @@ func (s *InboundService) GetInbounds(userId int) ([]*model.Inbound, error) {
+ func (s *InboundService) GetInboundsSlim(userId int) ([]*model.Inbound, error) {
+ 	db := database.GetDB()
+ 	var inbounds []*model.Inbound
+-	err := db.Model(model.Inbound{}).Preload("ClientStats").Where("user_id = ?", userId).Find(&inbounds).Error
++	err := db.Model(model.Inbound{}).Preload("ClientStats").Where("user_id = ?", userId).Order("sort_order ASC, id ASC").Find(&inbounds).Error
+ 	if err != nil && err != gorm.ErrRecordNotFound {
+ 		return nil, err
+ 	}
+@@ -361,6 +361,26 @@ func (s *InboundService) GetInboundsByTrafficReset(period string) ([]*model.Inbo
+ 	return inbounds, nil
+ }
+ 
++func (s *InboundService) ReorderInbounds(ids []int) error {
++	if len(ids) == 0 {
++		return nil
++	}
++	db := database.GetDB()
++	tx := db.Begin()
++	defer func() {
++		if r := recover(); r != nil {
++			tx.Rollback()
++		}
++	}()
++	for i, id := range ids {
++		if err := tx.Model(&model.Inbound{}).Where("id = ?", id).Update("sort_order", (i+1)*10).Error; err != nil {
++			tx.Rollback()
++			return err
++		}
++	}
++	return tx.Commit().Error
++}
++
+ func (s *InboundService) GetClients(inbound *model.Inbound) ([]model.Client, error) {
+ 	settings := map[string][]model.Client{}
+ 	json.Unmarshal([]byte(inbound.Settings), &settings)
+@@ -372,9 +392,126 @@ func (s *InboundService) GetClients(inbound *model.Inbound) ([]model.Client, err
+ 	if clients == nil {
+ 		return nil, nil
+ 	}
++	// Auto-assign clientId in-memory only — do NOT write back to DB here
++	for i := range clients {
++		if clients[i].ClientID == 0 {
++			clients[i].ClientID = s.allocateClientId(clients)
++		}
++	}
+ 	return clients, nil
+ }
+ 
++// allocateClientId returns the next free clientId for a slice of clients (1-based, never reuses)
++func (s *InboundService) allocateClientId(clients []model.Client) int {
++	maxId := 0
++	for _, c := range clients {
++		if c.ClientID > maxId {
++			maxId = c.ClientID
++		}
++	}
++	return maxId + 1
++}
++
++// ensureClientIdsInSettings ensures every entry in settings.clients, .accounts and .peers
++// has a ClientID. Called when saving an inbound.
++func (s *InboundService) ensureClientIdsInSettings(inbound *model.Inbound) error {
++	var settings map[string]any
++	if err := json.Unmarshal([]byte(inbound.Settings), &settings); err != nil {
++		return err
++	}
++	changed := false
++	// clients[]
++	if clientsArr, ok := settings["clients"].([]any); ok {
++		maxId := 0
++		for _, raw := range clientsArr {
++			if c, ok := raw.(map[string]any); ok {
++				if id, exists := c["clientId"]; exists {
++					if f, ok := id.(float64); ok && int(f) > maxId {
++						maxId = int(f)
++					}
++				}
++			}
++		}
++		for _, raw := range clientsArr {
++			if c, ok := raw.(map[string]any); ok {
++				if _, exists := c["clientId"]; !exists || c["clientId"] == nil || c["clientId"] == 0 {
++					maxId++
++					c["clientId"] = maxId
++					changed = true
++				}
++			}
++		}
++	}
++	// accounts[] / peers[]
++	for _, key := range []string{"accounts", "peers"} {
++		if arr, ok := settings[key].([]any); ok {
++			maxId := 0
++			for _, raw := range arr {
++				if c, ok := raw.(map[string]any); ok {
++					if id, exists := c["clientId"]; exists {
++						if f, ok := id.(float64); ok && int(f) > maxId {
++							maxId = int(f)
++						}
++					}
++				}
++			}
++			for _, raw := range arr {
++				if c, ok := raw.(map[string]any); ok {
++					if _, exists := c["clientId"]; !exists || c["clientId"] == nil || c["clientId"] == 0 {
++						maxId++
++						c["clientId"] = maxId
++						changed = true
++					}
++				}
++			}
++		}
++	}
++	if changed {
++		newSettings, _ := json.Marshal(settings)
++		inbound.Settings = string(newSettings)
++	}
++	return nil
++}
++
++// GetEmailForClientId returns the human-readable identifier for a client entry.
++func (s *InboundService) GetEmailForClientId(inbound *model.Inbound, clientId int) string {
++	clients, _ := s.GetClients(inbound)
++	for _, c := range clients {
++		if c.ClientID == clientId {
++			if c.Email != "" {
++				return c.Email
++			}
++			if c.Auth != "" {
++				return "auth:" + c.Auth
++			}
++			return fmt.Sprintf("id:%d", clientId)
++		}
++	}
++	var rawSettings map[string]any
++	if err := json.Unmarshal([]byte(inbound.Settings), &rawSettings); err != nil {
++		return fmt.Sprintf("id:%d", clientId)
++	}
++	for _, key := range []string{"accounts", "peers"} {
++		if arr, ok := rawSettings[key].([]any); ok {
++			for _, raw := range arr {
++				if c, ok := raw.(map[string]any); ok {
++					id, _ := c["clientId"].(float64)
++					if int(id) == clientId {
++						if email, ok := c["email"].(string); ok && email != "" {
++							return email
++						}
++						if auth, ok := c["auth"].(string); ok && auth != "" {
++							return "auth:" + auth
++						}
++						return fmt.Sprintf("id:%d", clientId)
++					}
++				}
++			}
++		}
++	}
++	return fmt.Sprintf("id:%d", clientId)
++}
++
+ func (s *InboundService) getAllEmails() ([]string, error) {
+ 	db := database.GetDB()
+ 	var emails []string
+@@ -549,6 +686,9 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
+ 		}
+ 	}()
+ 
++	// Ensure all clients have clientId before saving
++	s.ensureClientIdsInSettings(inbound)
++
+ 	err = tx.Save(inbound).Error
+ 	if err == nil {
+ 		if len(inbound.ClientStats) == 0 {
+@@ -837,6 +977,9 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound,
+ 	oldInbound.Settings = inbound.Settings
+ 	oldInbound.StreamSettings = inbound.StreamSettings
+ 	oldInbound.Sniffing = inbound.Sniffing
++	oldInbound.ExternalAddr = inbound.ExternalAddr
++	oldInbound.ExternalAddrTls = inbound.ExternalAddrTls
++	oldInbound.ExternalPort = inbound.ExternalPort
+ 	oldInbound.Tag, err = s.resolveInboundTag(inbound, inbound.Id)
+ 	if err != nil {
+ 		return inbound, false, err
+@@ -882,6 +1025,9 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound,
+ 		}
+ 	}
+ 
++	// Ensure all clients have clientId before saving
++	s.ensureClientIdsInSettings(oldInbound)
++
+ 	if err = tx.Save(oldInbound).Error; err != nil {
+ 		return inbound, false, err
+ 	}
+diff --git a/web/service/node.go b/web/service/node.go
+index 29cf5f10..93952df3 100644
+--- a/web/service/node.go
++++ b/web/service/node.go
+@@ -1,10 +1,12 @@
+ package service
+ 
+ import (
++	"bytes"
+ 	"context"
+ 	"encoding/json"
+ 	"errors"
+ 	"fmt"
++	"io"
+ 	"net"
+ 	"net/http"
+ 	"net/url"
+@@ -372,6 +374,106 @@ type ProbeResultUI struct {
+ 	Error        string  `json:"error"`
+ }
+ 
++func buildNodeBaseURL(n *model.Node) *url.URL {
++	scheme := n.Scheme
++	if scheme != "http" && scheme != "https" {
++		scheme = "https"
++	}
++	addr, _ := netsafe.NormalizeHost(n.Address)
++	return &url.URL{
++		Scheme: scheme,
++		Host:   net.JoinHostPort(addr, strconv.Itoa(n.Port)),
++	}
++}
++
++func (s *NodeService) buildNodeRequest(ctx context.Context, n *model.Node, method, path string, body io.Reader) (*http.Request, error) {
++	baseURL := buildNodeBaseURL(n)
++	reqURL := baseURL.JoinPath(normalizeBasePath(n.BasePath) + path)
++	req, err := http.NewRequestWithContext(
++		netsafe.ContextWithAllowPrivate(ctx, n.AllowPrivateAddress),
++		method, reqURL.String(), body)
++	if err != nil {
++		return nil, err
++	}
++	if n.ApiToken != "" {
++		req.Header.Set("Authorization", "Bearer "+n.ApiToken)
++	}
++	req.Header.Set("Accept", "application/json")
++	return req, nil
++}
++
++// FetchRemoteSettings fetches the full settings from a remote node's panel.
++func (s *NodeService) FetchRemoteSettings(nodeID int) (map[string]any, error) {
++	n, err := s.GetById(nodeID)
++	if err != nil {
++		return nil, err
++	}
++	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
++	defer cancel()
++	req, err := s.buildNodeRequest(ctx, n, http.MethodPost, "panel/setting/all", nil)
++	if err != nil {
++		return nil, err
++	}
++	resp, err := nodeHTTPClient.Do(req)
++	if err != nil {
++		return nil, err
++	}
++	defer resp.Body.Close()
++	if resp.StatusCode != http.StatusOK {
++		return nil, fmt.Errorf("remote panel returned HTTP %d", resp.StatusCode)
++	}
++	var envelope struct {
++		Success bool           `json:"success"`
++		Msg     string         `json:"msg"`
++		Obj     map[string]any `json:"obj"`
++	}
++	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
++		return nil, err
++	}
++	if !envelope.Success {
++		return nil, fmt.Errorf("remote panel returned error: %s", envelope.Msg)
++	}
++	return envelope.Obj, nil
++}
++
++// PushRemoteSettings pushes settings to a remote node's panel.
++func (s *NodeService) PushRemoteSettings(nodeID int, settings map[string]any) error {
++	n, err := s.GetById(nodeID)
++	if err != nil {
++		return err
++	}
++	body, err := json.Marshal(settings)
++	if err != nil {
++		return err
++	}
++	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
++	defer cancel()
++	req, err := s.buildNodeRequest(ctx, n, http.MethodPost, "panel/setting/update", bytes.NewReader(body))
++	if err != nil {
++		return err
++	}
++	req.Header.Set("Content-Type", "application/json")
++	resp, err := nodeHTTPClient.Do(req)
++	if err != nil {
++		return err
++	}
++	defer resp.Body.Close()
++	if resp.StatusCode != http.StatusOK {
++		return fmt.Errorf("remote panel returned HTTP %d", resp.StatusCode)
++	}
++	var envelope struct {
++		Success bool   `json:"success"`
++		Msg     string `json:"msg"`
++	}
++	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
++		return err
++	}
++	if !envelope.Success {
++		return fmt.Errorf("remote panel returned error: %s", envelope.Msg)
++	}
++	return nil
++}
++
+ func (p HeartbeatPatch) ToUI(ok bool) ProbeResultUI {
+ 	r := ProbeResultUI{
+ 		LatencyMs:    p.LatencyMs,
+diff --git a/web/service/port_conflict.go b/web/service/port_conflict.go
+index 8d71082b..dad4e34d 100644
+--- a/web/service/port_conflict.go
++++ b/web/service/port_conflict.go
+@@ -128,8 +128,13 @@ func isAnyListen(s string) bool {
+ func (s *InboundService) checkPortConflict(inbound *model.Inbound, ignoreId int) (bool, error) {
+ 	db := database.GetDB()
+ 
++	// Disabled inbounds don't conflict with anyone
++	if !inbound.Enable {
++		return false, nil
++	}
++
+ 	var candidates []*model.Inbound
+-	q := db.Model(model.Inbound{}).Where("port = ?", inbound.Port)
++	q := db.Model(model.Inbound{}).Where("port = ? AND enable = ?", inbound.Port, true)
+ 	if ignoreId > 0 {
+ 		q = q.Where("id != ?", ignoreId)
+ 	}
+@@ -152,6 +157,21 @@ func (s *InboundService) checkPortConflict(inbound *model.Inbound, ignoreId int)
+ 	return false, nil
+ }
+ 
++// portConflictErr returns an error with conflicting enabled inbound names
++func (s *InboundService) portConflictErr(port, ignoreId int) error {
++	db := database.GetDB()
++	var names []string
++	q := db.Model(&model.Inbound{}).Where("port = ? AND enable = ?", port, true)
++	if ignoreId > 0 {
++		q = q.Where("id != ?", ignoreId)
++	}
++	q.Pluck("remark", &names)
++	if len(names) == 0 {
++		return common.NewError(fmt.Sprintf("Port %d confict with enabled inbounds", port))
++	}
++	return common.NewError(fmt.Sprintf("Port %d confict with enabled inbounds: %s", port, strings.Join(names, ",")))
++}
++
+ // sameNode reports whether two NodeID pointers refer to the same xray
+ // process. nil/nil means both inbounds run on the local panel; non-nil
+ // with equal value means they share the same remote node. any mix
+@@ -241,17 +261,19 @@ func (s *InboundService) generateInboundTag(inbound *model.Inbound, ignoreId int
+ 
+ // resolveInboundTag chooses a tag for an Add or Update. when the caller
+ // supplied a non-empty Tag (e.g. the central panel pushed its picked
+-// tag to a node during a multi-node sync) and that tag is free in the
+-// local DB, it's used verbatim so the two panels stay in agreement —
+-// otherwise the node would regenerate (often back to bare
+-// "inbound-<port>") and the eventual traffic sync-back would try to
+-// INSERT a row whose tag already exists, hitting the UNIQUE constraint
+-// on inbounds.tag and rolling the node-side row right back out.
+-// when Tag is empty (the common UI path) or collides, fall back to the
+-// transport-aware generateInboundTag.
++// tag to a node during a multi-node sync) and that tag is free among
++// local inbounds in the DB, it's used verbatim so the two panels stay
++// in agreement — otherwise the node would regenerate (often back to
++// bare "inbound-<port>") and the eventual traffic sync-back would
++// create a duplicate. when Tag is empty (the common UI path) or
++// collides, fall back to the transport-aware generateInboundTag.
+ //
+ // ignoreId mirrors generateInboundTag: pass 0 on add, the inbound's
+ // own id on update so a row doesn't see its own current tag as taken.
++//
++// With the (tag, node_id) composite unique index, local and remote
++// inbounds can share the same tag, so tagExists only checks local
++// inbounds (node_id IS NULL).
+ func (s *InboundService) resolveInboundTag(inbound *model.Inbound, ignoreId int) (string, error) {
+ 	if inbound.Tag != "" {
+ 		taken, err := s.tagExists(inbound.Tag, ignoreId)
+@@ -267,7 +289,7 @@ func (s *InboundService) resolveInboundTag(inbound *model.Inbound, ignoreId int)
+ 
+ func (s *InboundService) tagExists(tag string, ignoreId int) (bool, error) {
+ 	db := database.GetDB()
+-	q := db.Model(model.Inbound{}).Where("tag = ?", tag)
++	q := db.Model(model.Inbound{}).Where("tag = ? AND node_id IS NULL", tag)
+ 	if ignoreId > 0 {
+ 		q = q.Where("id != ?", ignoreId)
+ 	}
+diff --git a/web/service/server.go b/web/service/server.go
+index 9fc65b40..cf515f7d 100644
+--- a/web/service/server.go
++++ b/web/service/server.go
+@@ -767,6 +767,10 @@ func (s *ServerService) downloadXRay(version string) (string, error) {
+ 	return path, nil
+ }
+ 
++func (s *ServerService) GetCurrentXrayVersion() string {
++	return s.xrayService.GetXrayVersion()
++}
++
+ func (s *ServerService) UpdateXray(version string) error {
+ 	versions, err := s.GetXrayVersions()
+ 	if err != nil {
+@@ -776,6 +780,12 @@ func (s *ServerService) UpdateXray(version string) error {
+ 		return fmt.Errorf("xray version %q is not in the fetched release list", version)
+ 	}
+ 
++	currentVersion := s.GetCurrentXrayVersion()
++	if currentVersion != "Unknown" && currentVersion == version {
++		logger.Infof("Xray already at version %s, skipping update", version)
++		return nil
++	}
++
+ 	// 1. Stop xray before doing anything
+ 	if err := s.StopXrayService(); err != nil {
+ 		logger.Warning("failed to stop xray before update:", err)
+diff --git a/web/service/setting.go b/web/service/setting.go
+index 1d5173a6..e083c404 100644
+--- a/web/service/setting.go
++++ b/web/service/setting.go
+@@ -70,7 +70,7 @@ var defaultValueMap = map[string]string{
+ 	"subUpdates":                  "12",
+ 	"subEncrypt":                  "true",
+ 	"subShowInfo":                 "true",
+-	"subEmailInRemark":            "true",
++	"subEmailInRemark":            "false",
+ 	"subURI":                      "",
+ 	"subJsonPath":                 "/json/",
+ 	"subJsonURI":                  "",
+@@ -89,6 +89,10 @@ var defaultValueMap = map[string]string{
+ 	"restartXrayOnClientDisable":  "true",
+ 	"xrayOutboundTestUrl":         "https://www.google.com/generate_204",
+ 
++	// Xray auto-update defaults
++	"xrayAutoUpdate": "true",
++	"xrayUpdateCron":  "0 30 2 * * *",
++
+ 	// LDAP defaults
+ 	"ldapEnable":            "false",
+ 	"ldapHost":              "",
+@@ -399,6 +403,22 @@ func (s *SettingService) GetTgLang() (string, error) {
+ 	return s.getString("tgLang")
+ }
+ 
++func (s *SettingService) GetXrayAutoUpdate() (bool, error) {
++	return s.getBool("xrayAutoUpdate")
++}
++
++func (s *SettingService) SetXrayAutoUpdate(value bool) error {
++	return s.setBool("xrayAutoUpdate", value)
++}
++
++func (s *SettingService) GetXrayUpdateCron() (string, error) {
++	return s.getString("xrayUpdateCron")
++}
++
++func (s *SettingService) SetXrayUpdateCron(value string) error {
++	return s.setString("xrayUpdateCron", value)
++}
++
+ func (s *SettingService) GetTwoFactorEnable() (bool, error) {
+ 	return s.getBool("twoFactorEnable")
+ }
+@@ -896,9 +916,10 @@ func (s *SettingService) GetDefaultSettings(host string) (any, error) {
+ 		"subURI":         func() (any, error) { return s.GetSubURI() },
+ 		"subJsonURI":     func() (any, error) { return s.GetSubJsonURI() },
+ 		"subClashURI":    func() (any, error) { return s.GetSubClashURI() },
+-		"remarkModel":    func() (any, error) { return s.GetRemarkModel() },
+-		"datepicker":     func() (any, error) { return s.GetDatepicker() },
+-		"ipLimitEnable":  func() (any, error) { return s.GetIpLimitEnable() },
++		"remarkModel":       func() (any, error) { return s.GetRemarkModel() },
++		"datepicker":        func() (any, error) { return s.GetDatepicker() },
++		"ipLimitEnable":     func() (any, error) { return s.GetIpLimitEnable() },
++		"subEmailInRemark":  func() (any, error) { return s.GetSubEmailInRemark() },
+ 	}
+ 
+ 	result := make(map[string]any)
+diff --git a/web/service/subscription.go b/web/service/subscription.go
+new file mode 100644
+index 00000000..63680e6b
+--- /dev/null
++++ b/web/service/subscription.go
+@@ -0,0 +1,281 @@
++package service
++
++import (
++	"fmt"
++	"math/rand"
++	"strconv"
++	"strings"
++	"time"
++
++	"github.com/mhsanaei/3x-ui/v3/database"
++	"github.com/mhsanaei/3x-ui/v3/database/model"
++	"gorm.io/gorm"
++)
++
++const subIdCharset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
++
++type SubscriptionService struct{}
++
++func generateSubId() string {
++	b := make([]byte, 16)
++	for i := range b {
++		b[i] = subIdCharset[rand.Intn(len(subIdCharset))]
++	}
++	return string(b)
++}
++
++func init() {
++	rand.Seed(time.Now().UnixNano())
++}
++
++func (s *SubscriptionService) GetAll() ([]*model.Subscription, error) {
++	db := database.GetDB()
++	var subs []*model.Subscription
++	err := db.Model(model.Subscription{}).Order("id asc").Find(&subs).Error
++	return subs, err
++}
++
++func (s *SubscriptionService) GetById(id int) (*model.Subscription, error) {
++	db := database.GetDB()
++	sub := &model.Subscription{}
++	err := db.Model(model.Subscription{}).Where("id = ?", id).First(sub).Error
++	return sub, err
++}
++
++func (s *SubscriptionService) GetBySubId(subId string) (*model.Subscription, error) {
++	db := database.GetDB()
++	sub := &model.Subscription{}
++	err := db.Model(model.Subscription{}).Where("sub_id = ?", subId).First(sub).Error
++	return sub, err
++}
++
++// GetByInboundId returns subscriptions that contain the given inbound ID.
++func (s *SubscriptionService) GetByInboundId(inboundId int) ([]*model.Subscription, error) {
++	db := database.GetDB()
++	var subs []*model.Subscription
++	err := db.Model(model.Subscription{}).Where("inbound_ids LIKE ?", "%"+strconv.Itoa(inboundId)+"%").Find(&subs).Error
++	return subs, err
++}
++
++func (s *SubscriptionService) Create(sub *model.Subscription) error {
++	db := database.GetDB()
++	if sub.SubId == "" {
++		sub.SubId = generateSubId()
++	}
++	sub.CreatedAt = time.Now().UnixMilli()
++	sub.UpdatedAt = time.Now().UnixMilli()
++	return db.Create(sub).Error
++}
++
++func (s *SubscriptionService) Update(id int, in *model.Subscription) error {
++	db := database.GetDB()
++	updates := map[string]any{
++		"sub_id":                   in.SubId,
++		"enable":                   in.Enable,
++		"format":                   in.Format,
++		"password":                 in.Password,
++		"inbound_ids":              in.InboundIds,
++		"expiry_time":              in.ExpiryTime,
++		"show_info":                in.ShowInfo,
++		"email_in_remark":          in.EmailInRemark,
++		"title":                    in.Title,
++		"support_url":              in.SupportUrl,
++		"profile_url":              in.ProfileUrl,
++		"announce":                 in.Announce,
++		"update_interval":          in.UpdateInterval,
++		"remark":                   in.Remark,
++		"sync_with_inbound_order":  in.SyncWithInboundOrder,
++		"auto_include_all_enabled": in.AutoIncludeAllEnabled,
++		"user_agent_enabled":       in.UserAgentEnabled,
++		"user_agent_values":        in.UserAgentValues,
++		"updated_at":               time.Now().UnixMilli(),
++	}
++	return db.Model(model.Subscription{}).Where("id = ?", id).Updates(updates).Error
++}
++
++func (s *SubscriptionService) SetEnable(id int, enable bool) error {
++	db := database.GetDB()
++	return db.Model(model.Subscription{}).Where("id = ?", id).Update("enable", enable).Error
++}
++
++func (s *SubscriptionService) Delete(id int) error {
++	db := database.GetDB()
++	return db.Where("id = ?", id).Delete(model.Subscription{}).Error
++}
++
++// UpdateLastUsedAt updates the last used timestamp for the subscription with the given subId.
++func (s *SubscriptionService) UpdateLastUsedAt(subId string) {
++	db := database.GetDB()
++	db.Model(model.Subscription{}).Where("sub_id = ?", subId).Update("last_used_at", time.Now().UnixMilli())
++}
++
++// IncrementCallCount increments the call count for the subscription with the given subId.
++func (s *SubscriptionService) IncrementCallCount(subId string) {
++	db := database.GetDB()
++	db.Model(model.Subscription{}).Where("sub_id = ?", subId).UpdateColumn("call_count", gorm.Expr("call_count + 1"))
++}
++
++// RemoveInboundId removes all references to a specific inbound from all subscriptions.
++func (s *SubscriptionService) RemoveInboundId(inboundId int) error {
++	db := database.GetDB()
++	var allSubs []*model.Subscription
++	db.Find(&allSubs)
++	for _, sub := range allSubs {
++		refs := ParseSubClientRefs(sub.InboundIds)
++		newRefs := make([]SubClientRef, 0, len(refs))
++		for _, ref := range refs {
++			if ref.InboundID == inboundId {
++				continue // remove all entries for this inbound
++			}
++			newRefs = append(newRefs, ref)
++		}
++		if len(newRefs) == len(refs) {
++			continue // no change
++		}
++		if len(newRefs) == 0 {
++			db.Delete(model.Subscription{}, sub.Id)
++		} else {
++			db.Model(model.Subscription{}).Where("id = ?", sub.Id).Update("inbound_ids", joinSubClientRefs(newRefs))
++		}
++	}
++	return nil
++}
++
++// SubClientRef represents a single entry in inboundIds: an inbound ID and optionally a client ID.
++type SubClientRef struct {
++	InboundID int
++	ClientID  int // 0 = all clients of the inbound
++}
++
++func parseInboundIds(s string) []int {
++	if s == "" {
++		return nil
++	}
++	parts := strings.Split(s, ",")
++	ids := make([]int, 0, len(parts))
++	for _, p := range parts {
++		// Support "inboundId:clientId" format — strip the :clientId part for bare ID lookup
++		ref := parseSubClientRef(p)
++		ids = append(ids, ref.InboundID)
++	}
++	return ids
++}
++
++func parseSubClientRef(s string) SubClientRef {
++	s = strings.TrimSpace(s)
++	parts := strings.SplitN(s, ":", 2)
++	inboundID, err := strconv.Atoi(parts[0])
++	if err != nil {
++		return SubClientRef{}
++	}
++	if len(parts) == 2 {
++		clientID, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
++		if err2 == nil && clientID > 0 {
++			return SubClientRef{InboundID: inboundID, ClientID: clientID}
++		}
++	}
++	return SubClientRef{InboundID: inboundID, ClientID: 0}
++}
++
++// ParseSubClientRefs parses the full inboundIds string into structured references.
++func ParseSubClientRefs(s string) []SubClientRef {
++	if s == "" {
++		return nil
++	}
++	parts := strings.Split(s, ",")
++	refs := make([]SubClientRef, 0, len(parts))
++	for _, p := range parts {
++		ref := parseSubClientRef(p)
++		if ref.InboundID > 0 {
++			refs = append(refs, ref)
++		}
++	}
++	return refs
++}
++
++func joinInboundIds(ids []int) string {
++	parts := make([]string, len(ids))
++	for i, id := range ids {
++		parts[i] = strconv.Itoa(id)
++	}
++	return strings.Join(parts, ",")
++}
++
++// joinSubClientRefs serializes a slice of SubClientRef back to the inboundIds string.
++func joinSubClientRefs(refs []SubClientRef) string {
++	parts := make([]string, 0, len(refs))
++	for _, ref := range refs {
++		if ref.ClientID > 0 {
++			parts = append(parts, fmt.Sprintf("%d:%d", ref.InboundID, ref.ClientID))
++		} else {
++			parts = append(parts, strconv.Itoa(ref.InboundID))
++		}
++	}
++	return strings.Join(parts, ",")
++}
++
++// RemoveClientFromSubscriptions removes a specific inbound+client combination from all subscriptions.
++// If a subscription becomes empty, it is deleted. Returns lists of (affected, deleted) subscription IDs.
++func (s *SubscriptionService) RemoveClientFromSubscriptions(inboundId, clientId int) (affected, toBeDeleted []int, err error) {
++	db := database.GetDB()
++	var allSubs []*model.Subscription
++	db.Find(&allSubs)
++	for _, sub := range allSubs {
++		refs := ParseSubClientRefs(sub.InboundIds)
++		newRefs := make([]SubClientRef, 0, len(refs))
++		matched := false
++		for _, ref := range refs {
++			if ref.InboundID == inboundId && (ref.ClientID == 0 || ref.ClientID == clientId) {
++				matched = true
++				continue
++			}
++			newRefs = append(newRefs, ref)
++		}
++		if !matched {
++			continue
++		}
++		if len(newRefs) == 0 {
++			db.Delete(model.Subscription{}, sub.Id)
++			toBeDeleted = append(toBeDeleted, sub.Id)
++		} else {
++			db.Model(model.Subscription{}).Where("id = ?", sub.Id).Update("inbound_ids", joinSubClientRefs(newRefs))
++			affected = append(affected, sub.Id)
++		}
++	}
++	return
++}
++
++// CheckClientSubscriptions returns subscriptions that reference a specific inbound+client.
++// Returns (affected, toBeDeleted) where toBeDeleted are subscriptions that will become empty.
++func (s *SubscriptionService) CheckClientSubscriptions(inboundId, clientId int) (affected, toBeDeleted []*model.Subscription, err error) {
++	db := database.GetDB()
++	var allSubs []*model.Subscription
++	db.Find(&allSubs)
++	for _, sub := range allSubs {
++		refs := ParseSubClientRefs(sub.InboundIds)
++		matched := false
++		for _, ref := range refs {
++			if ref.InboundID == inboundId && (ref.ClientID == 0 || ref.ClientID == clientId) {
++				matched = true
++				break
++			}
++		}
++		if !matched {
++			continue
++		}
++		// Check if this ref is the only one
++		remaining := 0
++		for _, ref := range refs {
++			if ref.InboundID == inboundId && (ref.ClientID == 0 || ref.ClientID == clientId) {
++				continue
++			}
++			remaining++
++		}
++		if remaining == 0 {
++			toBeDeleted = append(toBeDeleted, sub)
++		} else {
++			affected = append(affected, sub)
++		}
++	}
++	return
++}

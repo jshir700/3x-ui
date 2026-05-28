@@ -33,10 +33,12 @@ import { useTheme } from '@/hooks/useTheme';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useXraySetting } from '@/hooks/useXraySetting';
+import { useAllSetting } from '@/hooks/useAllSetting';
 import type { XraySettingsValue } from '@/hooks/useXraySetting';
 import AppSidebar from '@/components/AppSidebar';
 import JsonEditor from '@/components/JsonEditor';
 import { setMessageInstance } from '@/utils/messageBus';
+import { HttpUtil } from '@/utils';
 
 import BasicsTab from './BasicsTab';
 import RoutingTab from './RoutingTab';
@@ -96,6 +98,20 @@ export default function XrayPage() {
     resetToDefault,
     restartXray,
   } = xs;
+
+  const { allSetting, updateSetting } = useAllSetting();
+
+  const onChangeXrayAutoUpdate = useCallback(async (value: boolean) => {
+    updateSetting({ xrayAutoUpdate: value } as Partial<typeof allSetting>);
+    allSetting.xrayAutoUpdate = value;
+    await HttpUtil.post('/panel/setting/update', allSetting);
+  }, [allSetting, updateSetting]);
+
+  const onChangeXrayUpdateCron = useCallback(async (value: string) => {
+    updateSetting({ xrayUpdateCron: value } as Partial<typeof allSetting>);
+    allSetting.xrayUpdateCron = value;
+    await HttpUtil.post('/panel/setting/update', allSetting);
+  }, [allSetting, updateSetting]);
 
   useWebSocket({ outbounds: applyOutboundsEvent as never });
 
@@ -231,10 +247,10 @@ export default function XrayPage() {
 
   function confirmRestart() {
     modal.confirm({
-      title: 'Restart xray?',
-      content: 'Reloads the xray service with the saved configuration.',
-      okText: 'Restart',
-      cancelText: 'Cancel',
+      title: t('pages.xray.restartConfirmTitle'),
+      content: t('pages.xray.restartConfirmContent'),
+      okText: t('pages.inbounds.restartXray'),
+      cancelText: t('cancel'),
       onOk: () => restartXray(),
     });
   }
@@ -263,7 +279,7 @@ export default function XrayPage() {
 
         <Layout className="content-shell">
           <Layout.Content id="content-layout" className="content-area">
-            <Spin spinning={spinning || !fetched} delay={200} description="Loading…" size="large">
+            <Spin spinning={spinning || !fetched} delay={200} description={t('loading')} size="large">
               {!fetched ? (
                 <div className="loading-spacer" />
               ) : fetchError ? (
@@ -289,7 +305,7 @@ export default function XrayPage() {
                             {restartResult && (
                               <Popover
                                 placement="rightTop"
-                                title="Xray restart output"
+                                title={t('pages.xray.restartOutput')}
                                 content={<pre className="restart-result">{restartResult}</pre>}
                               >
                                 <QuestionCircleOutlined className="restart-icon" />
@@ -331,6 +347,11 @@ export default function XrayPage() {
                               onShowWarp={() => setWarpOpen(true)}
                               onShowNord={() => setNordOpen(true)}
                               onResetDefault={resetToDefault}
+                              xrayAutoUpdate={allSetting.xrayAutoUpdate}
+                              xrayUpdateCron={allSetting.xrayUpdateCron}
+                              timeLocation={allSetting.timeLocation}
+                              onChangeXrayAutoUpdate={onChangeXrayAutoUpdate}
+                              onChangeXrayUpdateCron={onChangeXrayUpdateCron}
                             />
                           ),
                         },
@@ -397,9 +418,9 @@ export default function XrayPage() {
                         {
                           key: 'tpl-dns',
                           label: (
-                            <Tooltip title={isMobile ? 'DNS' : ''}>
+                            <Tooltip title={isMobile ? t('pages.xray.dnsTab') : ''}>
                               <DatabaseOutlined />
-                              {!isMobile && <span> DNS</span>}
+                              {!isMobile && <span> {t('pages.xray.dnsTab')}</span>}
                             </Tooltip>
                           ),
                           children: (

@@ -1,4 +1,4 @@
-package runtime
+﻿package runtime
 
 import (
 	"bytes"
@@ -15,9 +15,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/database/model"
-	"github.com/mhsanaei/3x-ui/v3/logger"
-	"github.com/mhsanaei/3x-ui/v3/util/netsafe"
+	"github.com/jshir700/3x-ui/v3/database/model"
+	"github.com/jshir700/3x-ui/v3/logger"
+	"github.com/jshir700/3x-ui/v3/util/netsafe"
 )
 
 const remoteHTTPTimeout = 10 * time.Second

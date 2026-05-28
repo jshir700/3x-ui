@@ -201,55 +201,9 @@ export default function SubscriptionFormatsTab({ allSetting, updateSetting }: Su
   }
 
   return (
-    <Collapse defaultActiveKey="1" items={[
+    <Collapse defaultActiveKey={['1']} items={[
       {
         key: '1',
-        label: t('pages.settings.panelSettings'),
-        children: (
-          <>
-            {allSetting.subJsonEnable && (
-              <>
-                <SettingListItem paddings="small" title={<>JSON {t('pages.settings.subPath')}</>} description={t('pages.settings.subPathDesc')}>
-                  <Input
-                    value={allSetting.subJsonPath}
-                    placeholder="/json/"
-                    onChange={(e) => updateSetting({ subJsonPath: sanitizePath(e.target.value) })}
-                    onBlur={() => updateSetting({ subJsonPath: normalizePath(allSetting.subJsonPath) })}
-                  />
-                </SettingListItem>
-                <SettingListItem paddings="small" title={<>JSON {t('pages.settings.subURI')}</>} description={t('pages.settings.subURIDesc')}>
-                  <Input
-                    value={allSetting.subJsonURI}
-                    placeholder="(http|https)://domain[:port]/path/"
-                    onChange={(e) => updateSetting({ subJsonURI: e.target.value })}
-                  />
-                </SettingListItem>
-              </>
-            )}
-            {allSetting.subClashEnable && (
-              <>
-                <SettingListItem paddings="small" title={<>Clash {t('pages.settings.subPath')}</>} description={t('pages.settings.subPathDesc')}>
-                  <Input
-                    value={allSetting.subClashPath}
-                    placeholder="/clash/"
-                    onChange={(e) => updateSetting({ subClashPath: sanitizePath(e.target.value) })}
-                    onBlur={() => updateSetting({ subClashPath: normalizePath(allSetting.subClashPath) })}
-                  />
-                </SettingListItem>
-                <SettingListItem paddings="small" title={<>Clash {t('pages.settings.subURI')}</>} description={t('pages.settings.subURIDesc')}>
-                  <Input
-                    value={allSetting.subClashURI}
-                    placeholder="(http|https)://domain[:port]/path/"
-                    onChange={(e) => updateSetting({ subClashURI: e.target.value })}
-                  />
-                </SettingListItem>
-              </>
-            )}
-          </>
-        ),
-      },
-      {
-        key: '2',
         label: t('pages.settings.fragment'),
         children: (
           <>
@@ -290,21 +244,21 @@ export default function SubscriptionFormatsTab({ allSetting, updateSetting }: Su
         ),
       },
       {
-        key: '3',
-        label: 'Noises',
+        key: '2',
+        label: t('pages.settings.noises'),
         children: (
           <>
-            <SettingListItem paddings="small" title="Noises" description={t('pages.settings.noisesDesc')}>
+            <SettingListItem paddings="small" title={t('pages.settings.noises')} description={t('pages.settings.noisesDesc')}>
               <Switch checked={noisesEnabled} onChange={setNoisesEnabled} />
             </SettingListItem>
             {noisesEnabled && (
               <div className="nested-block">
                 <Collapse items={noisesArray.map((noise, index) => ({
                   key: String(index),
-                  label: `Noise №${index + 1}`,
+                  label: `${t('pages.settings.noiseN')}${index + 1}`,
                   children: (
                     <>
-                      <SettingListItem paddings="small" title="Type">
+                      <SettingListItem paddings="small" title={t('pages.settings.noiseType')}>
                         <Select
                           value={noise.type}
                           style={{ width: '100%' }}
@@ -312,15 +266,15 @@ export default function SubscriptionFormatsTab({ allSetting, updateSetting }: Su
                           options={['rand', 'base64', 'str', 'hex'].map((p) => ({ value: p, label: p }))}
                         />
                       </SettingListItem>
-                      <SettingListItem paddings="small" title="Packet">
+                      <SettingListItem paddings="small" title={t('pages.settings.noisePacket')}>
                         <Input value={noise.packet} placeholder="5-10"
                           onChange={(e) => updateNoiseField(index, 'packet', e.target.value)} />
                       </SettingListItem>
-                      <SettingListItem paddings="small" title="Delay (ms)">
+                      <SettingListItem paddings="small" title={t('pages.settings.noiseDelay')}>
                         <Input value={noise.delay} placeholder="10-20"
                           onChange={(e) => updateNoiseField(index, 'delay', e.target.value)} />
                       </SettingListItem>
-                      <SettingListItem paddings="small" title="Apply to">
+                      <SettingListItem paddings="small" title={t('pages.settings.noiseApplyTo')}>
                         <Select
                           value={noise.applyTo}
                           style={{ width: '100%' }}
@@ -338,14 +292,14 @@ export default function SubscriptionFormatsTab({ allSetting, updateSetting }: Su
                     </>
                   ),
                 }))} />
-                <Button type="primary" style={{ marginTop: 10 }} onClick={addNoise}>+ Noise</Button>
+                <Button type="primary" style={{ marginTop: 10 }} onClick={addNoise}>{t('pages.settings.noiseAdd')}</Button>
               </div>
             )}
           </>
         ),
       },
       {
-        key: '4',
+        key: '3',
         label: t('pages.settings.mux'),
         children: (
           <>
@@ -360,15 +314,15 @@ export default function SubscriptionFormatsTab({ allSetting, updateSetting }: Su
                     label: t('pages.settings.muxSett'),
                     children: (
                       <>
-                        <SettingListItem paddings="small" title="Concurrency">
+                        <SettingListItem paddings="small" title={t('pages.settings.muxConcurrency')}>
                           <InputNumber value={muxObj.concurrency} min={-1} max={1024} style={{ width: '100%' }}
                             onChange={(v) => setMuxField('concurrency', Number(v) || 0)} />
                         </SettingListItem>
-                        <SettingListItem paddings="small" title="xudp concurrency">
+                        <SettingListItem paddings="small" title={t('pages.settings.muxXudpConcurrency')}>
                           <InputNumber value={muxObj.xudpConcurrency} min={-1} max={1024} style={{ width: '100%' }}
                             onChange={(v) => setMuxField('xudpConcurrency', Number(v) || 0)} />
                         </SettingListItem>
-                        <SettingListItem paddings="small" title="xudp UDP 443">
+                        <SettingListItem paddings="small" title={t('pages.settings.muxXudpUDP443')}>
                           <Select
                             value={muxObj.xudpProxyUDP443}
                             style={{ width: '100%' }}
@@ -386,7 +340,7 @@ export default function SubscriptionFormatsTab({ allSetting, updateSetting }: Su
         ),
       },
       {
-        key: '5',
+        key: '4',
         label: t('pages.settings.direct'),
         children: (
           <>

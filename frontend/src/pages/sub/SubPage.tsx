@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Button,
@@ -12,19 +12,22 @@ import {
   Popover,
   QRCode,
   Row,
-  Select,
   Space,
   Tag,
+  Alert,
 } from 'antd';
 import {
   AndroidOutlined,
   AppleOutlined,
   CopyOutlined,
   DownOutlined,
-  SettingOutlined,
+  LinkOutlined,
+  QuestionCircleOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
 
-import { ClipboardManager, IntlUtil, LanguageManager } from '@/utils';
+import { ClipboardManager, ColorUtils, IntlUtil, LanguageManager, SizeFormatter } from '@/utils';
+import InfinityIcon from '@/components/InfinityIcon';
 import { setMessageInstance } from '@/utils/messageBus';
 import { pauseAnimationsUntilLeave, useTheme } from '@/hooks/useTheme';
 import './SubPage.css';
@@ -33,53 +36,34 @@ const QR_SIZE = 240;
 
 const subData = window.__SUB_PAGE_DATA__ || {};
 
-const sId = subData.sId || '';
 const enabled = !!subData.enabled;
 const download = subData.download || '0';
 const upload = subData.upload || '0';
-const total = subData.total || '∞';
-const used = subData.used || '0';
 const remained = subData.remained || '';
 const totalByte = Number(subData.totalByte || 0);
+const downloadByte = Number(subData.downloadByte || 0);
+const uploadByte = Number(subData.uploadByte || 0);
 const expireMs = Number(subData.expire || 0) * 1000;
 const lastOnlineMs = Number(subData.lastOnline || 0);
 const subUrl = subData.subUrl || '';
-const subJsonUrl = subData.subJsonUrl || '';
-const subClashUrl = subData.subClashUrl || '';
 const subTitle = subData.subTitle || '';
+const remark = subData.remark || '';
+const subSupportUrl = subData.subSupportUrl || '';
+const subProfileUrl = subData.subProfileUrl || '';
+const announce = subData.announce || '';
+const updateInterval = subData.updateInterval || '0';
+const callCount = Number(subData.callCount || 0);
+const clientCount = Number(subData.clientCount || 0);
+const linkCount = Number(subData.linkCount || 0);
+const format = subData.format || '';
 const links: string[] = Array.isArray(subData.links) ? subData.links : [];
 const datepicker = subData.datepicker || 'gregorian';
-
-const isUnlimited = totalByte <= 0 && expireMs === 0;
-const isActive = (() => {
-  if (!enabled) return false;
-  if (totalByte > 0) {
-    const usedByteCalc = Number(subData.usedByte || 0)
-      || (Number(subData.downloadByte || 0) + Number(subData.uploadByte || 0));
-    if (usedByteCalc >= totalByte) return false;
-  }
-  if (expireMs > 0 && Date.now() >= expireMs) return false;
-  return true;
-})();
-
-function linkName(link: string, idx: number): string {
-  if (!link) return `Link ${idx + 1}`;
-  const hashIdx = link.indexOf('#');
-  if (hashIdx >= 0 && hashIdx + 1 < link.length) {
-    try {
-      return decodeURIComponent(link.slice(hashIdx + 1));
-    } catch {
-      return link.slice(hashIdx + 1);
-    }
-  }
-  const proto = link.split('://')[0];
-  return `${proto.toUpperCase()} ${idx + 1}`;
-}
 
 export default function SubPage() {
   const { t } = useTranslation();
   const { isDark, isUltra, toggleTheme, toggleUltra, antdThemeConfig } = useTheme();
   const [messageApi, messageContextHolder] = message.useMessage();
+  const qrRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => { setMessageInstance(messageApi); }, [messageApi]);
 
   const [isMobile, setIsMobile] = useState<boolean>(() => window.innerWidth < 576);
@@ -115,6 +99,44 @@ export default function SubPage() {
     if (ok) messageApi.success(t('copied'));
   }, [t, messageApi]);
 
+  const getQrBlob = useCallback(async (): Promise<Blob | null> => {
+    const canvas = qrRef.current?.querySelector('canvas') as HTMLCanvasElement | null;
+    if (canvas) return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    const svgEl = qrRef.current?.querySelector('svg') as SVGSVGElement | null;
+    if (!svgEl) return null;
+    const svgData = new XMLSerializer().serializeToString(svgEl);
+    const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(svgBlob);
+    return new Promise<Blob | null>((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const cvs = document.createElement('canvas');
+        cvs.width = QR_SIZE;
+        cvs.height = QR_SIZE;
+        const ctx = cvs.getContext('2d');
+        if (!ctx) { URL.revokeObjectURL(url); resolve(null); return; }
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, QR_SIZE, QR_SIZE);
+        ctx.drawImage(img, 0, 0, QR_SIZE, QR_SIZE);
+        URL.revokeObjectURL(url);
+        cvs.toBlob((blob) => resolve(blob), 'image/png');
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+      img.src = url;
+    });
+  }, []);
+
+  const copyImage = useCallback(async () => {
+    const blob = await getQrBlob();
+    if (!blob) return;
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      messageApi.success(t('copiedQrImage'));
+    } catch {
+      messageApi.error(t('copyFailed') !== 'copyFailed' ? t('copyFailed') : 'Copy failed');
+    }
+  }, [getQrBlob, messageApi, t]);
+
   const open = useCallback((url: string) => {
     if (!url) return;
     window.open(url, '_blank');
@@ -125,12 +147,12 @@ export default function SubPage() {
     const separator = subUrl.includes('?') ? '&' : '?';
     const rawUrl = subUrl + separator + 'flag=shadowrocket';
     const base64Url = btoa(rawUrl).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    const remark = encodeURIComponent(subTitle || sId || 'Subscription');
+    const remark = encodeURIComponent(subTitle || 'Subscription');
     return `shadowrocket://add/sub/${base64Url}?remark=${remark}`;
   }, []);
 
   const v2boxUrl = useMemo(
-    () => `v2box://install-sub?url=${encodeURIComponent(subUrl)}&name=${encodeURIComponent(sId)}`,
+    () => `v2box://install-sub?url=${encodeURIComponent(subUrl)}&name=${encodeURIComponent(subTitle || 'Sub')}`,
     [],
   );
   const streisandUrl = useMemo(() => `streisand://import/${encodeURIComponent(subUrl)}`, []);
@@ -143,9 +165,36 @@ export default function SubPage() {
     return classes.join(' ');
   }, [isDark, isUltra]);
 
+  const usedBytes = downloadByte + uploadByte;
+  const remaining = totalByte > 0 ? Math.max(0, totalByte - usedBytes) : 0;
+  const isUnlimited = totalByte <= 0 && expireMs === 0;
+  const isActive = enabled
+    && (totalByte <= 0 || usedBytes < totalByte)
+    && (expireMs <= 0 || Date.now() < expireMs);
+
+  const intervalDisplay = useMemo(() => {
+    const totalHours = parseInt(updateInterval) || 0;
+    if (totalHours <= 0) return '';
+    const days = Math.floor(totalHours / 24);
+    const hours = totalHours % 24;
+    const parts: string[] = [];
+    if (days > 0) parts.push(`${days}${t('subIntervalDays')}`);
+    if (hours > 0) parts.push(`${hours}${t('subIntervalHours')}`);
+    return parts.join(' ');
+  }, [updateInterval, t]);
+
+  const displayContent = useMemo(() => {
+    const raw = links.join('\n');
+    if (!raw) return '';
+    if (format === 'json') {
+      try { return JSON.stringify(JSON.parse(raw), null, 2); }
+      catch { return raw; }
+    }
+    return raw;
+  }, [links, format]);
+
   const descriptionsItems = useMemo(() => {
     const items = [
-      { key: 'subId', label: t('subscription.subId'), children: sId },
       {
         key: 'status',
         label: t('subscription.status'),
@@ -157,34 +206,71 @@ export default function SubPage() {
                 {isActive ? t('subscription.active') : t('subscription.inactive')}
               </Tag>,
       },
-      { key: 'down', label: t('subscription.downloaded'), children: download },
-      { key: 'up', label: t('subscription.uploaded'), children: upload },
-      { key: 'used', label: t('usage'), children: used },
-      { key: 'total', label: t('subscription.totalQuota'), children: total },
+      {
+        key: 'clientCount',
+        label: t('subClients'),
+        children: clientCount,
+      },
+      {
+        key: 'linkCount',
+        label: t('subLinkCount'),
+        children: linkCount,
+      },
+      {
+        key: 'traffic',
+        label: t('subscription.traffic'),
+        children: (
+          <Popover content={(
+            <table cellPadding={2}>
+              <tbody>
+                <tr><td>{'↑'}</td><td>{SizeFormatter.sizeFormat(uploadByte)}</td></tr>
+                <tr><td>{'↓'}</td><td>{SizeFormatter.sizeFormat(downloadByte)}</td></tr>
+                {totalByte > 0 && usedBytes < totalByte && (
+                  <tr><td>{t('remained')}</td><td>{SizeFormatter.sizeFormat(remaining)}</td></tr>
+                )}
+              </tbody>
+            </table>
+          )}>
+            <Tag color={ColorUtils.usageColor(usedBytes, 0, totalByte)}>
+              {SizeFormatter.sizeFormat(usedBytes)} /{' '}
+              {totalByte > 0 ? SizeFormatter.sizeFormat(totalByte) : <InfinityIcon />}
+            </Tag>
+          </Popover>
+        ),
+      },
+      {
+        key: 'expiry',
+        label: t('subscription.expiry'),
+        children: expireMs === 0
+          ? t('subscription.noExpiry')
+          : IntlUtil.formatDate(expireMs, datepicker),
+      },
     ];
-    if (totalByte > 0) {
-      items.push({ key: 'remained', label: t('remained'), children: remained });
+    if (updateInterval !== '0') {
+      items.push({
+        key: 'updInterval',
+        label: t('subscription.updateInterval'),
+        children: intervalDisplay,
+      });
     }
     items.push({
-      key: 'lastOnline',
-      label: t('lastOnline'),
-      children: lastOnlineMs > 0 ? IntlUtil.formatDate(lastOnlineMs, datepicker) : '-',
+      key: 'onlineCount',
+      label: t('subscription.onlineCount'),
+      children: callCount > 0 ? callCount : '-',
     });
     items.push({
-      key: 'expiry',
-      label: t('subscription.expiry'),
-      children: expireMs === 0
-        ? t('subscription.noExpiry')
-        : IntlUtil.formatDate(expireMs, datepicker),
+      key: 'lastOnline',
+      label: t('subscription.lastOnlineTime'),
+      children: lastOnlineMs > 0 ? IntlUtil.formatDate(lastOnlineMs, datepicker) : '-',
     });
     return items;
-  }, [t]);
+  }, [t, isActive, isUnlimited, usedBytes, uploadByte, downloadByte, totalByte, remaining, intervalDisplay]);
 
   const androidMenuItems = useMemo(() => [
     {
       key: 'android-v2box',
       label: 'V2Box',
-      onClick: () => open(`v2box://install-sub?url=${encodeURIComponent(subUrl)}&name=${encodeURIComponent(sId)}`),
+      onClick: () => open(`v2box://install-sub?url=${encodeURIComponent(subUrl)}&name=${encodeURIComponent(subTitle || 'Sub')}`),
     },
     {
       key: 'android-v2rayng',
@@ -206,17 +292,18 @@ export default function SubPage() {
     { key: 'ios-happ', label: 'Happ', onClick: () => open(happUrl) },
   ], [copy, open, shadowrocketUrl, v2boxUrl, streisandUrl, happUrl]);
 
-  const langOptions = useMemo(
+  const langMenuItems = useMemo(
     () => LanguageManager.supportedLanguages.map((l: { value: string; name: string; icon: string }) => ({
-      value: l.value,
-      label: (
-        <>
-          <span aria-label={l.name}>{l.icon}</span>
-          &nbsp;&nbsp;<span>{l.name}</span>
-        </>
-      ),
+      key: l.value,
+      icon: <span>{l.icon}</span>,
+      label: l.name,
     })),
     [],
+  );
+
+  const currentLang = useMemo(
+    () => LanguageManager.supportedLanguages.find((l) => l.value === lang),
+    [lang],
   );
 
   const themeIcon = !isDark ? (
@@ -235,15 +322,27 @@ export default function SubPage() {
     </svg>
   );
 
+  const displayTitle = remark || subTitle || '';
   const cardTitle = (
     <Space>
-      <span>{t('subscription.title')}</span>
-      <Tag>{sId}</Tag>
+      {displayTitle && <span style={{ fontSize: 18, fontWeight: 600 }}>{displayTitle}</span>}
+      {format && <Tag color="blue">{format}</Tag>}
     </Space>
   );
 
   const cardExtra = (
     <Space size={8} align="center">
+      <Dropdown
+        trigger={['click']}
+        menu={{
+          items: langMenuItems,
+          onClick: ({ key }) => onLangChange(key),
+        }}
+      >
+        <Button size="small">
+          {currentLang?.icon} {currentLang?.name} <DownOutlined />
+        </Button>
+      </Dropdown>
       <button
         type="button"
         id="sub-theme-cycle"
@@ -254,23 +353,6 @@ export default function SubPage() {
       >
         {themeIcon}
       </button>
-      <Popover
-        title={t('pages.settings.language')}
-        placement="bottomRight"
-        trigger="click"
-        content={
-          <Space orientation="vertical" size={10} className="settings-popover">
-            <Select
-              className="lang-select"
-              value={lang}
-              onChange={onLangChange}
-              options={langOptions}
-            />
-          </Space>
-        }
-      >
-        <Button shape="circle" icon={<SettingOutlined />} />
-      </Popover>
     </Space>
   );
 
@@ -280,84 +362,67 @@ export default function SubPage() {
       <Layout className={pageClass}>
         <Layout.Content className="content">
           <Row justify="center">
-            <Col xs={24} sm={22} md={18} lg={14} xl={12}>
-              <Card hoverable className="subscription-card" title={cardTitle} extra={cardExtra}>
-                <Row gutter={[8, 8]} justify="center" className="qr-row">
-                  <Col xs={24} sm={subJsonUrl || subClashUrl ? 12 : 24} className="qr-col">
-                    <div className="qr-box">
-                      <Tag color="purple" className="qr-tag">{t('pages.settings.subSettings')}</Tag>
+            <Col xs={24} sm={23} md={22} lg={20} xl={18}>
+              <Card className="subscription-card" title={cardTitle} extra={cardExtra}>
+                <Row gutter={24}>
+                  <Col xs={24} md={13}>
+                    <Descriptions
+                      bordered
+                      column={1}
+                      size="small"
+                      className="info-table"
+                      items={descriptionsItems}
+                    />
+                  </Col>
+
+                  <Col xs={24} md={11} className="qr-col">
+                    <div ref={qrRef} className="qr-box">
                       <QRCode
                         className="qr-code"
                         value={subUrl}
                         size={QR_SIZE}
-                        type="svg"
+                        type="canvas"
                         bordered={false}
-                        color="#000000"
-                        bgColor="#ffffff"
-                        title={t('copy')}
-                        onClick={() => copy(subUrl)}
+                        color={isDark || isUltra ? '#fff' : '#000'}
+                        bgColor={isUltra ? '#0c0e12' : isDark ? '#252526' : '#ffffff'}
+                        title={t('clickToCopyImage')}
+                        onClick={copyImage}
                       />
                     </div>
                   </Col>
-                  {subJsonUrl && (
-                    <Col xs={24} sm={12} className="qr-col">
-                      <div className="qr-box">
-                        <Tag color="purple" className="qr-tag">
-                          {t('pages.settings.subSettings')} JSON
-                        </Tag>
-                        <QRCode
-                          className="qr-code"
-                          value={subJsonUrl}
-                          size={QR_SIZE}
-                          type="svg"
-                          bordered={false}
-                          color="#000000"
-                          bgColor="#ffffff"
-                          title={t('copy')}
-                          onClick={() => copy(subJsonUrl)}
-                        />
-                      </div>
-                    </Col>
-                  )}
-                  {subClashUrl && (
-                    <Col xs={24} sm={12} className="qr-col">
-                      <div className="qr-box">
-                        <Tag color="purple" className="qr-tag">Clash / Mihomo</Tag>
-                        <QRCode
-                          className="qr-code"
-                          value={subClashUrl}
-                          size={QR_SIZE}
-                          type="svg"
-                          bordered={false}
-                          color="#000000"
-                          bgColor="#ffffff"
-                          title={t('copy')}
-                          onClick={() => copy(subClashUrl)}
-                        />
-                      </div>
-                    </Col>
-                  )}
                 </Row>
 
-                <Descriptions
-                  bordered
-                  column={1}
-                  size="small"
-                  className="info-table"
-                  items={descriptionsItems}
-                />
+                <Space className="quick-actions" size={32}>
+                  <Button type="primary" icon={<LinkOutlined />} onClick={() => copy(subUrl)}>
+                    {t('subscription.copyLink')}
+                  </Button>
+                  {subSupportUrl && (
+                    <Button icon={<QuestionCircleOutlined />} onClick={() => open(subSupportUrl)}>
+                      {t('subscription.supportLink')}
+                    </Button>
+                  )}
+                  {subProfileUrl && (
+                    <Button icon={<UserOutlined />} onClick={() => open(subProfileUrl)}>
+                      {t('subscription.profileLink')}
+                    </Button>
+                  )}
+                </Space>
 
-                {links.length > 0 && (
+                {announce && (
+                  <Alert
+                    type="warning"
+                    message={announce}
+                    showIcon
+                    className="announce-box"
+                  />
+                )}
+
+                {displayContent && (
                   <div className="links-section">
-                    {links.map((link, idx) => (
-                      <div key={link} className="link-row" onClick={() => copy(link)}>
-                        <Tag color="purple" className="link-tag">{linkName(link, idx)}</Tag>
-                        <div className="link-box">
-                          <CopyOutlined className="link-copy-icon" />
-                          {link}
-                        </div>
-                      </div>
-                    ))}
+                    <div className="link-box">
+                      <CopyOutlined className="link-copy-icon" onClick={() => copy(displayContent)} />
+                      <pre className="content-pre">{displayContent}</pre>
+                    </div>
                   </div>
                 )}
 

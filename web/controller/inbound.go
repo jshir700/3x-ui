@@ -1,4 +1,4 @@
-package controller
+﻿package controller
 
 import (
 	"encoding/json"
@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mhsanaei/3x-ui/v3/database/model"
-	"github.com/mhsanaei/3x-ui/v3/web/service"
-	"github.com/mhsanaei/3x-ui/v3/web/session"
-	"github.com/mhsanaei/3x-ui/v3/web/websocket"
+	"github.com/jshir700/3x-ui/v3/database/model"
+	"github.com/jshir700/3x-ui/v3/web/service"
+	"github.com/jshir700/3x-ui/v3/web/session"
+	"github.com/jshir700/3x-ui/v3/web/websocket"
 
 	"github.com/gin-gonic/gin"
 )
@@ -77,10 +77,12 @@ func (a *InboundController) initRouter(g *gin.RouterGroup) {
 	g.POST("/import", a.importInbound)
 	g.POST("/:id/fallbacks", a.setFallbacks)
 	g.GET("/checkSubscriptions/:id", a.checkInboundSubscriptions)
-	g.GET("/checkClientSubscriptions/:inboundId/:clientId", a.checkClientSubscriptions)
+	g.GET("/checkClients/:id", a.checkInboundClients)
+	g.GET("/checkClientSubscriptions", a.checkClientSubscriptions)
 	g.POST("/forceDel/:id", a.forceDelInbound)
 	g.POST("/:id/forceDelClient/:clientId", a.forceDelInboundClient)
 	g.POST("/reorder", a.reorderInbounds)
+	g.POST("/:id/clients/reorder", a.reorderClients)
 }
 
 // getInbounds retrieves the list of inbounds for the logged-in user.
@@ -193,13 +195,16 @@ func (a *InboundController) delInbound(c *gin.Context) {
 		}
 		info := make([]subInfo, 0)
 		for _, sub := range subs {
-			ids := parseCsvInboundIds(sub.InboundIds)
-			info = append(info, subInfo{
-				Id:      sub.Id,
-				SubId:   sub.SubId,
-				Remark:  sub.Remark,
-				OnlyOne: len(ids) == 1,
-			})
+			parts := strings.Split(sub.ClientEmails, ",")
+			onlyOne := len(parts) <= 1
+			for _, p := range parts {
+				email := strings.TrimSpace(p)
+				if email != "" && !strings.Contains(email, "@") {
+					onlyOne = false
+					break
+				}
+			}
+			info = append(info, subInfo{Id: sub.Id, SubId: sub.SubId, Remark: sub.Remark, OnlyOne: onlyOne})
 		}
 		jsonMsgObj(c, I18nWeb(c, "pages.inbounds.toasts.inboundDeleteHasSubscriptions"), gin.H{
 			"subscriptions": info,
@@ -450,6 +455,28 @@ func (a *InboundController) reorderInbounds(c *gin.Context) {
 	jsonMsg(c, "", nil)
 }
 
+// reorderClients updates the sort_order of clients within an inbound's settings
+// to match the ordered list of client emails.
+func (a *InboundController) reorderClients(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		jsonMsg(c, "Invalid inbound id", err)
+		return
+	}
+	var body struct {
+		Emails []string `json:"emails"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		jsonMsg(c, "Invalid request data", err)
+		return
+	}
+	if err := a.inboundService.ReorderClients(id, body.Emails); err != nil {
+		jsonMsg(c, "Reorder clients failed", err)
+		return
+	}
+	jsonMsg(c, "", nil)
+}
+
 // checkInboundSubscriptions returns subscriptions that reference a specific inbound.
 func (a *InboundController) checkInboundSubscriptions(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
@@ -471,27 +498,77 @@ func (a *InboundController) checkInboundSubscriptions(c *gin.Context) {
 	}
 	result := make([]subInfo, 0)
 	for _, sub := range subs {
-		ids := parseCsvInboundIds(sub.InboundIds)
-		result = append(result, subInfo{
-			Id:      sub.Id,
-			SubId:   sub.SubId,
-			Remark:  sub.Remark,
-			Title:   sub.Title,
-			OnlyOne: len(ids) == 1,
-		})
+		parts := strings.Split(sub.ClientEmails, ",")
+		onlyOne := len(parts) <= 1
+		for _, p := range parts {
+			email := strings.TrimSpace(p)
+			if email != "" && !strings.Contains(email, "@") {
+				onlyOne = false
+				break
+			}
+		}
+		result = append(result, subInfo{Id: sub.Id, SubId: sub.SubId, Remark: sub.Remark, Title: sub.Title, OnlyOne: onlyOne})
 	}
 	jsonObj(c, result, nil)
 }
 
-// checkClientSubscriptions returns subscriptions that reference a specific inbound+client pair.
-func (a *InboundController) checkClientSubscriptions(c *gin.Context) {
-	inboundId, err1 := strconv.Atoi(c.Param("inboundId"))
-	clientId, err2 := strconv.Atoi(c.Param("clientId"))
-	if err1 != nil || err2 != nil {
-		jsonMsg(c, I18nWeb(c, "get"), fmt.Errorf("invalid param"))
+// checkInboundClients returns the clients belonging to an inbound, split by
+// whether they also belong to other inbounds. Used by the frontend to warn
+// before deleting an inbound.
+func (a *InboundController) checkInboundClients(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "get"), err)
 		return
 	}
-	affected, toBeDeleted, err := a.subscriptionService.CheckClientSubscriptions(inboundId, clientId)
+	inbound, err := a.inboundService.GetInbound(id)
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "get"), err)
+		return
+	}
+	clients, err := a.inboundService.GetClients(inbound)
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	type clientInfo struct {
+		Email            string `json:"email"`
+		Comment          string `json:"comment,omitempty"`
+		OtherInboundIds  []int  `json:"otherInboundIds,omitempty"`
+	}
+	var onlyThisInbound []clientInfo
+	var multiInbound []clientInfo
+	for _, c := range clients {
+		if c.Email == "" {
+			continue
+		}
+		ibIds, _ := a.clientService.GetInboundIdsForEmail(nil, c.Email)
+		other := make([]int, 0)
+		for _, ibId := range ibIds {
+			if ibId != id {
+				other = append(other, ibId)
+			}
+		}
+		if len(other) == 0 {
+			onlyThisInbound = append(onlyThisInbound, clientInfo{Email: c.Email, Comment: c.Comment})
+		} else {
+			multiInbound = append(multiInbound, clientInfo{Email: c.Email, Comment: c.Comment, OtherInboundIds: other})
+		}
+	}
+	jsonObj(c, gin.H{
+		"onlyThisInbound": onlyThisInbound,
+		"multiInbound":    multiInbound,
+	}, nil)
+}
+
+// checkClientSubscriptions returns subscriptions that reference a specific email.
+func (a *InboundController) checkClientSubscriptions(c *gin.Context) {
+	email := c.Query("email")
+	if email == "" {
+		jsonMsg(c, I18nWeb(c, "get"), fmt.Errorf("missing email"))
+		return
+	}
+	affected, toBeDeleted, err := a.subscriptionService.CheckClientSubscriptions(email)
 	if err != nil {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
@@ -545,8 +622,9 @@ func (a *InboundController) forceDelInboundClient(c *gin.Context) {
 		return
 	}
 	clientId := c.Param("clientId")
-	if cid, convErr := strconv.Atoi(clientId); convErr == nil {
-		_, _, _ = a.subscriptionService.RemoveClientFromSubscriptions(id, cid)
+	// Find email before cleanup â subscription service now uses email-based identification
+	if email := a.inboundService.GetClientEmail(id, clientId); email != "" {
+		_, _, _ = a.subscriptionService.RemoveClientFromSubscriptions(email)
 	}
 	needRestart, err := a.clientService.DelInboundClient(&a.inboundService, id, clientId)
 	if err != nil {
@@ -559,20 +637,7 @@ func (a *InboundController) forceDelInboundClient(c *gin.Context) {
 	}
 }
 
-// parseCsvInboundIds parses a comma-separated list of inbound references.
-// Supports both "inboundId" and "inboundId:clientId" formats.
+// parseCsvInboundIds is deprecated — subscriptions now store emails instead of inbound IDs.
 func parseCsvInboundIds(s string) []int {
-	if s == "" {
-		return nil
-	}
-	parts := strings.Split(s, ",")
-	ids := make([]int, 0, len(parts))
-	for _, p := range parts {
-		ref := strings.SplitN(strings.TrimSpace(p), ":", 2)
-		id, err := strconv.Atoi(ref[0])
-		if err == nil {
-			ids = append(ids, id)
-		}
-	}
-	return ids
+	return nil
 }

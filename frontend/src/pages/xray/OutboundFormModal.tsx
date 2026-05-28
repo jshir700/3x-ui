@@ -215,20 +215,20 @@ export default function OutboundFormModal({
       : 'success';
 
   const tagHelp = tagEmpty
-    ? 'Tag is required'
+    ? t('pages.xray.outbound.tagRequired')
     : duplicateTag
-      ? 'Tag already used by another outbound'
+      ? t('pages.xray.outbound.tagDuplicate')
       : '';
 
   function onOk() {
     if (!ob) return;
     if (activeKey === '2' && !applyAdvancedJsonToForm()) return;
     if (!ob.tag?.trim()) {
-      messageApi.error('Tag is required');
+      messageApi.error(t('pages.xray.outbound.tagRequired'));
       return;
     }
     if (duplicateTag) {
-      messageApi.error('Tag already used by another outbound');
+      messageApi.error(t('pages.xray.outbound.tagDuplicate'));
       return;
     }
     onConfirm(ob.toJson());
@@ -240,17 +240,17 @@ export default function OutboundFormModal({
     try {
       const next = Outbound.fromLink(link);
       if (!next) {
-        messageApi.error('Wrong Link!');
+        messageApi.error(t('pages.xray.outbound.wrongLink'));
         return;
       }
       outboundRef.current = next;
       primeAdvancedJson();
       setLinkInput('');
-      messageApi.success('Link imported successfully...');
+      messageApi.success(t('pages.xray.outbound.linkImported'));
       setActiveKey('1');
       refresh();
     } catch (e) {
-      messageApi.error(`Link parse: ${(e as Error).message}`);
+      messageApi.error(`${t('pages.xray.outbound.linkParse')} ${(e as Error).message}`);
     }
   }
 
@@ -299,10 +299,10 @@ export default function OutboundFormModal({
                   />
                 </Form.Item>
 
-                <Form.Item label="Tag" validateStatus={tagValidateStatus} help={tagHelp} hasFeedback>
+                <Form.Item label={t('pages.xray.outbound.tag')} validateStatus={tagValidateStatus} help={tagHelp} hasFeedback>
                   <Input
                     value={ob.tag}
-                    placeholder="unique-tag"
+                    placeholder={t('pages.xray.outbound.tagPlaceholder')}
                     onChange={(e) => {
                       ob.tag = e.target.value;
                       refresh();
@@ -310,10 +310,10 @@ export default function OutboundFormModal({
                   />
                 </Form.Item>
 
-                <Form.Item label="Send through">
+                <Form.Item label={t('pages.xray.outbound.sendThrough')}>
                   <Input
                     value={ob.sendThrough || ''}
-                    placeholder="local IP"
+                    placeholder={t('pages.xray.outbound.sendThroughPlaceholder')}
                     onChange={(e) => {
                       ob.sendThrough = e.target.value;
                       refresh();
@@ -321,14 +321,14 @@ export default function OutboundFormModal({
                   />
                 </Form.Item>
 
-                {isFreedom && <FreedomFields ob={ob} refresh={refresh} />}
+                {isFreedom && <FreedomFields ob={ob} refresh={refresh} t={t} />}
                 {isBlackhole && (
-                  <Form.Item label="Response Type">
+                  <Form.Item label={t('pages.xray.outbound.responseType')}>
                     <Select
                       value={ob.settings.type || ''}
                       onChange={(v) => { ob.settings.type = v; refresh(); }}
                       options={[
-                        { value: '', label: '(empty)' },
+                        { value: '', label: `(${t('none')})` },
                         { value: 'none', label: 'none' },
                         { value: 'http', label: 'http' },
                       ]}
@@ -336,10 +336,10 @@ export default function OutboundFormModal({
                   </Form.Item>
                 )}
                 {isLoopback && (
-                  <Form.Item label="Inbound tag">
+                  <Form.Item label={t('pages.xray.outbound.inboundTag')}>
                     <Input
                       value={ob.settings.inboundTag || ''}
-                      placeholder="inbound tag using in routing rules"
+                      placeholder={t('pages.xray.outbound.inboundTagPlaceholder')}
                       onChange={(e) => { ob.settings.inboundTag = e.target.value; refresh(); }}
                     />
                   </Form.Item>
@@ -388,10 +388,10 @@ export default function OutboundFormModal({
                         options={Object.entries(SSMethods).map(([k, v]) => ({ value: v as string, label: k }))}
                       />
                     </Form.Item>
-                    <Form.Item label="UDP over TCP">
+                    <Form.Item label={t('pages.xray.outbound.udpOverTcp')}>
                       <Switch checked={!!ob.settings.uot} onChange={(v) => { ob.settings.uot = v; refresh(); }} />
                     </Form.Item>
-                    <Form.Item label="UoT version">
+                    <Form.Item label={t('pages.xray.outbound.uotVersion')}>
                       <InputNumber
                         value={ob.settings.UoTVersion ?? 1}
                         min={1}
@@ -420,7 +420,7 @@ export default function OutboundFormModal({
                 )}
 
                 {isHysteria && (
-                  <Form.Item label="Version">
+                  <Form.Item label={t('pages.xray.outbound.version')}>
                     <InputNumber value={ob.settings.version || 2} min={2} max={2} disabled />
                   </Form.Item>
                 )}
@@ -431,7 +431,7 @@ export default function OutboundFormModal({
 
                 {ob.canEnableTls() && <TlsFields ob={ob} refresh={refresh} t={t} />}
 
-                {ob.stream && <SockoptFields ob={ob} refresh={refresh} />}
+                {ob.stream && <SockoptFields ob={ob} refresh={refresh} t={t} />}
 
                 {ob.canEnableMux() && <MuxFields ob={ob} refresh={refresh} t={t} />}
               </Form>
@@ -443,13 +443,13 @@ export default function OutboundFormModal({
           },
           {
             key: '2',
-            label: 'JSON',
+            label: t('pages.xray.outbound.jsonTab'),
             children: (
               <Space orientation="vertical" size={10} style={{ width: '100%', marginTop: 10 }}>
                 <Input.Search
                   value={linkInput}
                   placeholder="vmess:// vless:// trojan:// ss:// hysteria2://"
-                  enterButton="Convert"
+                  enterButton={t('pages.xray.outbound.convert')}
                   onChange={(e) => setLinkInput(e.target.value)}
                   onSearch={convertLink}
                 />
@@ -481,28 +481,28 @@ interface TFieldProps extends FieldProps {
   t: (k: string) => string;
 }
 
-function FreedomFields({ ob, refresh }: FieldProps) {
+function FreedomFields({ ob, refresh, t }: TFieldProps) {
   const fragment = (ob.settings.fragment || {}) as Record<string, string>;
   const noises = (ob.settings.noises || []) as Array<{ type: string; packet: string; delay: string; applyTo: string }>;
   const finalRules = (ob.settings.finalRules || []) as Array<{ action: string; network?: string; port?: string; ip?: string[]; blockDelay?: string }>;
 
   return (
     <>
-      <Form.Item label="Strategy">
+      <Form.Item label={t('pages.xray.outbound.strategy')}>
         <Select
           value={ob.settings.domainStrategy}
           onChange={(v) => { ob.settings.domainStrategy = v; refresh(); }}
           options={(OutboundDomainStrategies as string[]).map((s) => ({ value: s, label: s }))}
         />
       </Form.Item>
-      <Form.Item label="Redirect">
+      <Form.Item label={t('pages.xray.outbound.redirect')}>
         <Input
           value={ob.settings.redirect || ''}
           onChange={(e) => { ob.settings.redirect = e.target.value; refresh(); }}
         />
       </Form.Item>
 
-      <Form.Item label="Fragment">
+      <Form.Item label={t('pages.xray.outbound.fragment')}>
         <Switch
           checked={!!ob.settings.fragment && Object.keys(ob.settings.fragment).length > 0}
           onChange={(checked) => {
@@ -515,7 +515,7 @@ function FreedomFields({ ob, refresh }: FieldProps) {
       </Form.Item>
       {ob.settings.fragment && Object.keys(ob.settings.fragment).length > 0 && (
         <>
-          <Form.Item label="Packets">
+          <Form.Item label={t('pages.xray.outbound.packets')}>
             <Select
               value={fragment.packets}
               onChange={(v) => { (ob.settings.fragment as Record<string, string>).packets = v; refresh(); }}
@@ -526,7 +526,7 @@ function FreedomFields({ ob, refresh }: FieldProps) {
             />
           </Form.Item>
           {(['length', 'interval', 'maxSplit'] as const).map((field) => (
-            <Form.Item key={field} label={field === 'maxSplit' ? 'Max Split' : field[0].toUpperCase() + field.slice(1)}>
+            <Form.Item key={field} label={field === 'maxSplit' ? t('pages.xray.outbound.maxSplit') : t(`pages.xray.outbound.${field}`)}>
               <Input
                 value={fragment[field] || ''}
                 onChange={(e) => { (ob.settings.fragment as Record<string, string>)[field] = e.target.value; refresh(); }}
@@ -536,7 +536,7 @@ function FreedomFields({ ob, refresh }: FieldProps) {
         </>
       )}
 
-      <Form.Item label="Noises">
+      <Form.Item label={t('pages.xray.outbound.noises')}>
         <Switch
           checked={noises.length > 0}
           onChange={(checked) => {
@@ -558,7 +558,7 @@ function FreedomFields({ ob, refresh }: FieldProps) {
         <div key={index}>
           <Form.Item wrapperCol={{ md: { span: 14, offset: 8 } }}>
             <div className="item-heading">
-              <span>Noise {index + 1}</span>
+              <span>{t('pages.xray.outbound.noiseN').replace('{n}', String(index + 1))}</span>
               {noises.length > 1 && (
                 <DeleteOutlined
                   className="danger-icon"
@@ -567,20 +567,20 @@ function FreedomFields({ ob, refresh }: FieldProps) {
               )}
             </div>
           </Form.Item>
-          <Form.Item label="Type">
+          <Form.Item label={t('pages.xray.outbound.type')}>
             <Select
               value={noise.type}
               onChange={(v) => { noise.type = v; refresh(); }}
               options={['rand', 'base64', 'str', 'hex'].map((x) => ({ value: x, label: x }))}
             />
           </Form.Item>
-          <Form.Item label="Packet">
+          <Form.Item label={t('pages.xray.outbound.packet')}>
             <Input value={noise.packet} onChange={(e) => { noise.packet = e.target.value; refresh(); }} />
           </Form.Item>
-          <Form.Item label="Delay (ms)">
+          <Form.Item label={t('pages.xray.outbound.delayMs')}>
             <Input value={noise.delay} onChange={(e) => { noise.delay = e.target.value; refresh(); }} />
           </Form.Item>
-          <Form.Item label="Apply to">
+          <Form.Item label={t('pages.xray.outbound.applyTo')}>
             <Select
               value={noise.applyTo}
               onChange={(v) => { noise.applyTo = v; refresh(); }}
@@ -590,7 +590,7 @@ function FreedomFields({ ob, refresh }: FieldProps) {
         </div>
       ))}
 
-      <Form.Item label="Final Rules">
+      <Form.Item label={t('pages.xray.outbound.finalRules')}>
         <Button
           size="small"
           type="primary"
@@ -598,44 +598,44 @@ function FreedomFields({ ob, refresh }: FieldProps) {
           onClick={() => { ob.settings.addFinalRule('allow'); refresh(); }}
         />
         <span className="ml-8" style={{ opacity: 0.6 }}>
-          Override Xray&apos;s default private-IP block (needed for LAN access through proxy)
+          {t('pages.xray.outbound.finalRulesDesc')}
         </span>
       </Form.Item>
       {finalRules.map((rule, index) => (
         <div key={`fr-${index}`}>
           <Form.Item wrapperCol={{ md: { span: 14, offset: 8 } }}>
             <div className="item-heading">
-              <span>Rule {index + 1}</span>
+              <span>{t('pages.xray.outbound.ruleN').replace('{n}', String(index + 1))}</span>
               <DeleteOutlined
                 className="danger-icon"
                 onClick={() => { ob.settings.delFinalRule(index); refresh(); }}
               />
             </div>
           </Form.Item>
-          <Form.Item label="Action">
+          <Form.Item label={t('pages.xray.outbound.action')}>
             <Select
               value={rule.action}
               onChange={(v) => { rule.action = v; refresh(); }}
               options={['allow', 'block'].map((x) => ({ value: x, label: x }))}
             />
           </Form.Item>
-          <Form.Item label="Network">
+          <Form.Item label={t('pages.xray.outbound.network')}>
             <Select
               value={rule.network}
               allowClear
-              placeholder="(any)"
+              placeholder={`(${t('any')})`}
               onChange={(v) => { rule.network = v; refresh(); }}
               options={['tcp', 'udp', 'tcp,udp'].map((x) => ({ value: x, label: x }))}
             />
           </Form.Item>
-          <Form.Item label="Port">
+          <Form.Item label={t('pages.xray.outbound.port')}>
             <Input
               value={rule.port}
               placeholder="e.g. 80,443 or 1000-2000"
               onChange={(e) => { rule.port = e.target.value; refresh(); }}
             />
           </Form.Item>
-          <Form.Item label="IP / CIDR / geoip">
+          <Form.Item label={t('pages.xray.outbound.ipCidrGeoip')}>
             <Select
               mode="tags"
               value={rule.ip || []}
@@ -645,7 +645,7 @@ function FreedomFields({ ob, refresh }: FieldProps) {
             />
           </Form.Item>
           {rule.action === 'block' && (
-            <Form.Item label="Block delay (ms)">
+            <Form.Item label={t('pages.xray.outbound.blockDelayMs')}>
               <Input
                 value={rule.blockDelay}
                 placeholder="optional: 5000-10000"
@@ -663,33 +663,33 @@ function DnsFields({ ob, refresh, t }: TFieldProps) {
   const rules = (ob.settings.rules || []) as Array<{ action: string; qtype?: string; domain?: string }>;
   return (
     <>
-      <Form.Item label="Rewrite network">
+      <Form.Item label={t('pages.xray.outbound.rewriteNetwork')}>
         <Select
           value={ob.settings.rewriteNetwork}
           allowClear
-          placeholder="(unchanged)"
+          placeholder={`(${'unchanged'})`}
           onChange={(v) => { ob.settings.rewriteNetwork = v; refresh(); }}
           options={['udp', 'tcp'].map((x) => ({ value: x, label: x }))}
         />
       </Form.Item>
-      <Form.Item label="Rewrite address">
+      <Form.Item label={t('pages.xray.outbound.rewriteAddress')}>
         <Input
           value={ob.settings.rewriteAddress || ''}
-          placeholder="(unchanged) e.g. 1.1.1.1"
+          placeholder={`(${'unchanged'}) e.g. 1.1.1.1`}
           onChange={(e) => { ob.settings.rewriteAddress = e.target.value; refresh(); }}
         />
       </Form.Item>
-      <Form.Item label="Rewrite port">
+      <Form.Item label={t('pages.xray.outbound.rewritePort')}>
         <InputNumber
           value={ob.settings.rewritePort || undefined}
           min={0}
           max={65535}
           style={{ width: '100%' }}
-          placeholder="(unchanged)"
+          placeholder={`(${'unchanged'})`}
           onChange={(v) => { ob.settings.rewritePort = Number(v) || 0; refresh(); }}
         />
       </Form.Item>
-      <Form.Item label="User level">
+      <Form.Item label={t('pages.xray.outbound.userLevel')}>
         <InputNumber
           value={ob.settings.userLevel || 0}
           min={0}
@@ -697,7 +697,7 @@ function DnsFields({ ob, refresh, t }: TFieldProps) {
           onChange={(v) => { ob.settings.userLevel = Number(v) || 0; refresh(); }}
         />
       </Form.Item>
-      <Form.Item label="Rules">
+      <Form.Item label={t('pages.xray.outbound.rules')}>
         <Button
           size="small"
           type="primary"
@@ -709,21 +709,21 @@ function DnsFields({ ob, refresh, t }: TFieldProps) {
         <div key={index}>
           <Form.Item wrapperCol={{ md: { span: 14, offset: 8 } }}>
             <div className="item-heading">
-              <span>Rule {index + 1}</span>
+              <span>{t('pages.xray.outbound.ruleN').replace('{n}', String(index + 1))}</span>
               <DeleteOutlined
                 className="danger-icon"
                 onClick={() => { (ob.settings.rules as unknown[]).splice(index, 1); refresh(); }}
               />
             </div>
           </Form.Item>
-          <Form.Item label="Action">
+          <Form.Item label={t('pages.xray.outbound.action')}>
             <Select
               value={rule.action}
               onChange={(v) => { rule.action = v; refresh(); }}
               options={(DNSRuleActions as string[]).map((a) => ({ value: a, label: a }))}
             />
           </Form.Item>
-          <Form.Item label="QType">
+          <Form.Item label={t('pages.xray.outbound.qtype')}>
             <Input
               value={rule.qtype}
               placeholder="1,3,23-24"
@@ -769,26 +769,26 @@ function WireguardFields({ ob, refresh, regenerate, t }: TFieldProps & { regener
       <Form.Item label={t('pages.inbounds.publicKey')}>
         <Input value={ob.settings.pubKey || ''} disabled />
       </Form.Item>
-      <Form.Item label="Domain strategy">
+      <Form.Item label={t('pages.xray.outbound.domainStrategy')}>
         <Select
           value={ob.settings.domainStrategy || ''}
           onChange={(v) => { ob.settings.domainStrategy = v; refresh(); }}
           options={['', ...(WireguardDomainStrategy as string[])].map((x) => ({ value: x, label: x || `(${t('none')})` }))}
         />
       </Form.Item>
-      <Form.Item label="MTU">
+      <Form.Item label={t('pages.xray.outbound.mtu')}>
         <InputNumber value={ob.settings.mtu || 0} min={0} onChange={(v) => { ob.settings.mtu = Number(v) || 0; refresh(); }} />
       </Form.Item>
-      <Form.Item label="Workers">
+      <Form.Item label={t('pages.xray.outbound.workers')}>
         <InputNumber value={ob.settings.workers || 0} min={0} onChange={(v) => { ob.settings.workers = Number(v) || 0; refresh(); }} />
       </Form.Item>
-      <Form.Item label="No-kernel TUN">
+      <Form.Item label={t('pages.xray.outbound.noKernelTun')}>
         <Switch checked={!!ob.settings.noKernelTun} onChange={(v) => { ob.settings.noKernelTun = v; refresh(); }} />
       </Form.Item>
-      <Form.Item label="Reserved">
+      <Form.Item label={t('pages.xray.outbound.reserved')}>
         <Input value={ob.settings.reserved || ''} onChange={(e) => { ob.settings.reserved = e.target.value; refresh(); }} />
       </Form.Item>
-      <Form.Item label="Peers">
+      <Form.Item label={t('pages.xray.outbound.peers')}>
         <Button
           size="small"
           type="primary"
@@ -800,7 +800,7 @@ function WireguardFields({ ob, refresh, regenerate, t }: TFieldProps & { regener
         <div key={index}>
           <Form.Item wrapperCol={{ md: { span: 14, offset: 8 } }}>
             <div className="item-heading">
-              <span>Peer {index + 1}</span>
+              <span>{t('pages.xray.outbound.peerN').replace('{n}', String(index + 1))}</span>
               {peers.length > 1 && (
                 <DeleteOutlined
                   className="danger-icon"
@@ -809,16 +809,16 @@ function WireguardFields({ ob, refresh, regenerate, t }: TFieldProps & { regener
               )}
             </div>
           </Form.Item>
-          <Form.Item label="Endpoint">
+          <Form.Item label={t('pages.xray.outbound.endpoint')}>
             <Input value={peer.endpoint} onChange={(e) => { peer.endpoint = e.target.value; refresh(); }} />
           </Form.Item>
           <Form.Item label={t('pages.inbounds.publicKey')}>
             <Input value={peer.publicKey} onChange={(e) => { peer.publicKey = e.target.value; refresh(); }} />
           </Form.Item>
-          <Form.Item label="PSK">
+          <Form.Item label={t('pages.xray.outbound.psk')}>
             <Input value={peer.psk} onChange={(e) => { peer.psk = e.target.value; refresh(); }} />
           </Form.Item>
-          <Form.Item label="Allowed IPs">
+          <Form.Item label={t('pages.xray.outbound.allowedIps')}>
             {(peer.allowedIPs || []).map((ip, idx) => (
               <Space.Compact key={idx} block style={{ marginBottom: 4 }}>
                 <Input
@@ -838,7 +838,7 @@ function WireguardFields({ ob, refresh, regenerate, t }: TFieldProps & { regener
               onClick={() => { (peer.allowedIPs = peer.allowedIPs || []).push(''); refresh(); }}
             />
           </Form.Item>
-          <Form.Item label="Keep alive">
+          <Form.Item label={t('pages.xray.outbound.keepAlive')}>
             <InputNumber value={peer.keepAlive || 0} min={0} onChange={(v) => { peer.keepAlive = Number(v) || 0; refresh(); }} />
           </Form.Item>
         </div>
@@ -851,7 +851,7 @@ function VMessVLessFields({ ob, refresh, isVMess, isVLESS, t }: TFieldProps & { 
   const rev = ob.settings.reverseSniffing || {};
   return (
     <>
-      <Form.Item label="ID">
+      <Form.Item label={t('pages.xray.outbound.clientId')}>
         <Input value={ob.settings.id || ''} onChange={(e) => { ob.settings.id = e.target.value; refresh(); }} />
       </Form.Item>
       {isVMess && (
@@ -872,17 +872,17 @@ function VMessVLessFields({ ob, refresh, isVMess, isVLESS, t }: TFieldProps & { 
         </Form.Item>
       )}
       {isVLESS && (
-        <Form.Item label="Reverse tag">
+        <Form.Item label={t('pages.xray.outbound.reverseTag')}>
           <Input
             value={ob.settings.reverseTag || ''}
-            placeholder="optional"
+            placeholder={t('pages.xray.outbound.reverseTagPlaceholder')}
             onChange={(e) => { ob.settings.reverseTag = e.target.value; refresh(); }}
           />
         </Form.Item>
       )}
       {isVLESS && ob.settings.reverseTag && (
         <>
-          <Form.Item label="Reverse Sniffing">
+          <Form.Item label={t('pages.xray.outbound.reverseSniffing')}>
             <Switch checked={!!rev.enabled} onChange={(v) => { rev.enabled = v; refresh(); }} />
           </Form.Item>
           {rev.enabled && (
@@ -895,13 +895,13 @@ function VMessVLessFields({ ob, refresh, isVMess, isVLESS, t }: TFieldProps & { 
                   options={Object.entries(SNIFFING_OPTION).map(([label, value]) => ({ label, value: value as string }))}
                 />
               </Form.Item>
-              <Form.Item label="Metadata Only">
+              <Form.Item label={t('pages.xray.outbound.metadataOnly')}>
                 <Switch checked={!!rev.metadataOnly} onChange={(v) => { rev.metadataOnly = v; refresh(); }} />
               </Form.Item>
-              <Form.Item label="Route Only">
+              <Form.Item label={t('pages.xray.outbound.routeOnly')}>
                 <Switch checked={!!rev.routeOnly} onChange={(v) => { rev.routeOnly = v; refresh(); }} />
               </Form.Item>
-              <Form.Item label="IPs Excluded">
+              <Form.Item label={t('pages.xray.outbound.ipsExcluded')}>
                 <Select
                   mode="tags"
                   value={rev.ipsExcluded || []}
@@ -911,7 +911,7 @@ function VMessVLessFields({ ob, refresh, isVMess, isVLESS, t }: TFieldProps & { 
                   onChange={(v) => { rev.ipsExcluded = v as string[]; refresh(); }}
                 />
               </Form.Item>
-              <Form.Item label="Domains Excluded">
+              <Form.Item label={t('pages.xray.outbound.domainsExcluded')}>
                 <Select
                   mode="tags"
                   value={rev.domainsExcluded || []}
@@ -926,7 +926,7 @@ function VMessVLessFields({ ob, refresh, isVMess, isVLESS, t }: TFieldProps & { 
         </>
       )}
       {ob.canEnableTlsFlow() && (
-        <Form.Item label="Flow">
+        <Form.Item label={t('pages.xray.outbound.flow')}>
           <Select
             value={ob.settings.flow || ''}
             onChange={(v) => { ob.settings.flow = v; refresh(); }}
@@ -952,7 +952,7 @@ function StreamFields({ ob, refresh, streamNetworkChange, isHysteria, t }: TFiel
 
       {ob.stream.network === 'tcp' && (
         <>
-          <Form.Item label={`HTTP ${t('camouflage')}`}>
+          <Form.Item label={t('pages.xray.outbound.httpCamouflage')}>
             <Switch
               checked={ob.stream.tcp.type === 'http'}
               onChange={(checked) => { ob.stream.tcp.type = checked ? 'http' : 'none'; refresh(); }}
@@ -975,12 +975,12 @@ function StreamFields({ ob, refresh, streamNetworkChange, isHysteria, t }: TFiel
         <>
           {(
             [
-              ['mtu', 'MTU', 0],
-              ['tti', 'TTI (ms)', 0],
-              ['upCap', 'Uplink (MB/s)', 0],
-              ['downCap', 'Downlink (MB/s)', 0],
-              ['cwndMultiplier', 'CWND multiplier', 1],
-              ['maxSendingWindow', 'Max sending window', 0],
+              ['mtu', t('pages.xray.outbound.mtu'), 0],
+              ['tti', t('pages.xray.outbound.kcpTti'), 0],
+              ['upCap', t('pages.xray.outbound.kcpUplink'), 0],
+              ['downCap', t('pages.xray.outbound.kcpDownlink'), 0],
+              ['cwndMultiplier', t('pages.xray.outbound.kcpCwnd'), 1],
+              ['maxSendingWindow', t('pages.xray.outbound.kcpMaxSendWindow'), 0],
             ] as const
           ).map(([field, label, min]) => (
             <Form.Item key={field} label={label}>
@@ -1002,7 +1002,7 @@ function StreamFields({ ob, refresh, streamNetworkChange, isHysteria, t }: TFiel
           <Form.Item label={t('path')}>
             <Input value={ob.stream.ws.path || ''} onChange={(e) => { ob.stream.ws.path = e.target.value; refresh(); }} />
           </Form.Item>
-          <Form.Item label="Heartbeat (s)">
+          <Form.Item label={t('pages.xray.outbound.heartbeatS')}>
             <InputNumber
               value={ob.stream.ws.heartbeatPeriod || 0}
               min={0}
@@ -1014,13 +1014,13 @@ function StreamFields({ ob, refresh, streamNetworkChange, isHysteria, t }: TFiel
 
       {ob.stream.network === 'grpc' && (
         <>
-          <Form.Item label="Service name">
+          <Form.Item label={t('pages.xray.outbound.serviceName')}>
             <Input value={ob.stream.grpc.serviceName || ''} onChange={(e) => { ob.stream.grpc.serviceName = e.target.value; refresh(); }} />
           </Form.Item>
-          <Form.Item label="Authority">
+          <Form.Item label={t('pages.xray.outbound.authority')}>
             <Input value={ob.stream.grpc.authority || ''} onChange={(e) => { ob.stream.grpc.authority = e.target.value; refresh(); }} />
           </Form.Item>
-          <Form.Item label="Multi mode">
+          <Form.Item label={t('pages.xray.outbound.multiMode')}>
             <Switch checked={!!ob.stream.grpc.multiMode} onChange={(v) => { ob.stream.grpc.multiMode = v; refresh(); }} />
           </Form.Item>
         </>
@@ -1039,7 +1039,7 @@ function StreamFields({ ob, refresh, streamNetworkChange, isHysteria, t }: TFiel
 
       {ob.stream.network === 'xhttp' && <XhttpFields ob={ob} refresh={refresh} t={t} />}
 
-      {ob.stream.network === 'hysteria' && <HysteriaTransportFields ob={ob} refresh={refresh} />}
+      {ob.stream.network === 'hysteria' && <HysteriaTransportFields ob={ob} refresh={refresh} t={t} />}
     </>
   );
 }
@@ -1076,7 +1076,7 @@ function XhttpFields({ ob, refresh, t }: TFieldProps) {
         ))}
       </Form.Item>
 
-      <Form.Item label="Mode">
+      <Form.Item label={t('pages.xray.outbound.mode')}>
         <Select
           value={xh.mode}
           onChange={(v) => { xh.mode = v; refresh(); }}
@@ -1085,30 +1085,30 @@ function XhttpFields({ ob, refresh, t }: TFieldProps) {
       </Form.Item>
       {xh.mode === 'packet-up' && (
         <>
-          <Form.Item label="Max Upload Size (Byte)">
+          <Form.Item label={t('pages.xray.outbound.maxUploadSize')}>
             <Input value={xh.scMaxEachPostBytes} onChange={(e) => { xh.scMaxEachPostBytes = e.target.value; refresh(); }} />
           </Form.Item>
-          <Form.Item label="Min Upload Interval (Ms)">
+          <Form.Item label={t('pages.xray.outbound.minUploadInterval')}>
             <Input value={xh.scMinPostsIntervalMs} onChange={(e) => { xh.scMinPostsIntervalMs = e.target.value; refresh(); }} />
           </Form.Item>
         </>
       )}
 
-      <Form.Item label="Padding Bytes">
+      <Form.Item label={t('pages.xray.outbound.paddingBytes')}>
         <Input value={xh.xPaddingBytes} onChange={(e) => { xh.xPaddingBytes = e.target.value; refresh(); }} />
       </Form.Item>
-      <Form.Item label="Padding Obfs Mode">
+      <Form.Item label={t('pages.xray.outbound.paddingObfsMode')}>
         <Switch checked={!!xh.xPaddingObfsMode} onChange={(v) => { xh.xPaddingObfsMode = v; refresh(); }} />
       </Form.Item>
       {xh.xPaddingObfsMode && (
         <>
-          <Form.Item label="Padding Key">
+          <Form.Item label={t('pages.xray.outbound.paddingKey')}>
             <Input value={xh.xPaddingKey} placeholder="x_padding" onChange={(e) => { xh.xPaddingKey = e.target.value; refresh(); }} />
           </Form.Item>
-          <Form.Item label="Padding Header">
+          <Form.Item label={t('pages.xray.outbound.paddingHeader')}>
             <Input value={xh.xPaddingHeader} placeholder="X-Padding" onChange={(e) => { xh.xPaddingHeader = e.target.value; refresh(); }} />
           </Form.Item>
-          <Form.Item label="Padding Placement">
+          <Form.Item label={t('pages.xray.outbound.paddingPlacement')}>
             <Select
               value={xh.xPaddingPlacement || ''}
               onChange={(v) => { xh.xPaddingPlacement = v; refresh(); }}
@@ -1121,7 +1121,7 @@ function XhttpFields({ ob, refresh, t }: TFieldProps) {
               ]}
             />
           </Form.Item>
-          <Form.Item label="Padding Method">
+          <Form.Item label={t('pages.xray.outbound.paddingMethod')}>
             <Select
               value={xh.xPaddingMethod || ''}
               onChange={(v) => { xh.xPaddingMethod = v; refresh(); }}
@@ -1135,7 +1135,7 @@ function XhttpFields({ ob, refresh, t }: TFieldProps) {
         </>
       )}
 
-      <Form.Item label="Uplink HTTP Method">
+      <Form.Item label={t('pages.xray.outbound.uplinkHttpMethod')}>
         <Select
           value={xh.uplinkHTTPMethod || ''}
           onChange={(v) => { xh.uplinkHTTPMethod = v; refresh(); }}
@@ -1148,7 +1148,7 @@ function XhttpFields({ ob, refresh, t }: TFieldProps) {
         />
       </Form.Item>
 
-      <Form.Item label="Session Placement">
+      <Form.Item label={t('pages.xray.outbound.sessionPlacement')}>
         <Select
           value={xh.sessionPlacement || ''}
           onChange={(v) => { xh.sessionPlacement = v; refresh(); }}
@@ -1162,12 +1162,12 @@ function XhttpFields({ ob, refresh, t }: TFieldProps) {
         />
       </Form.Item>
       {xh.sessionPlacement && xh.sessionPlacement !== 'path' && (
-        <Form.Item label="Session Key">
+        <Form.Item label={t('pages.xray.outbound.sessionKey')}>
           <Input value={xh.sessionKey} placeholder="x_session" onChange={(e) => { xh.sessionKey = e.target.value; refresh(); }} />
         </Form.Item>
       )}
 
-      <Form.Item label="Sequence Placement">
+      <Form.Item label={t('pages.xray.outbound.sequencePlacement')}>
         <Select
           value={xh.seqPlacement || ''}
           onChange={(v) => { xh.seqPlacement = v; refresh(); }}
@@ -1181,13 +1181,13 @@ function XhttpFields({ ob, refresh, t }: TFieldProps) {
         />
       </Form.Item>
       {xh.seqPlacement && xh.seqPlacement !== 'path' && (
-        <Form.Item label="Sequence Key">
+        <Form.Item label={t('pages.xray.outbound.sequenceKey')}>
           <Input value={xh.seqKey} placeholder="x_seq" onChange={(e) => { xh.seqKey = e.target.value; refresh(); }} />
         </Form.Item>
       )}
 
       {xh.mode === 'packet-up' && (
-        <Form.Item label="Uplink Data Placement">
+        <Form.Item label={t('pages.xray.outbound.uplinkDataPlacement')}>
           <Select
             value={xh.uplinkDataPlacement || ''}
             onChange={(v) => { xh.uplinkDataPlacement = v; refresh(); }}
@@ -1203,10 +1203,10 @@ function XhttpFields({ ob, refresh, t }: TFieldProps) {
       )}
       {xh.mode === 'packet-up' && xh.uplinkDataPlacement && xh.uplinkDataPlacement !== 'body' && (
         <>
-          <Form.Item label="Uplink Data Key">
+          <Form.Item label={t('pages.xray.outbound.uplinkDataKey')}>
             <Input value={xh.uplinkDataKey} placeholder="x_data" onChange={(e) => { xh.uplinkDataKey = e.target.value; refresh(); }} />
           </Form.Item>
-          <Form.Item label="Uplink Chunk Size">
+          <Form.Item label={t('pages.xray.outbound.uplinkChunkSize')}>
             <InputNumber
               value={xh.uplinkChunkSize}
               min={0}
@@ -1218,36 +1218,36 @@ function XhttpFields({ ob, refresh, t }: TFieldProps) {
       )}
 
       {(xh.mode === 'stream-up' || xh.mode === 'stream-one') && (
-        <Form.Item label="No gRPC Header">
+        <Form.Item label={t('pages.xray.outbound.noGrpcHeader')}>
           <Switch checked={!!xh.noGRPCHeader} onChange={(v) => { xh.noGRPCHeader = v; refresh(); }} />
         </Form.Item>
       )}
 
-      <Form.Item label="XMUX">
+      <Form.Item label={t('pages.xray.outbound.xmux')}>
         <Switch checked={!!xh.enableXmux} onChange={(v) => { xh.enableXmux = v; refresh(); }} />
       </Form.Item>
       {xh.enableXmux && (
         <>
           {!xh.xmux.maxConnections && (
-            <Form.Item label="Max Concurrency">
+            <Form.Item label={t('pages.xray.outbound.maxConcurrency')}>
               <Input value={xh.xmux.maxConcurrency} onChange={(e) => { xh.xmux.maxConcurrency = e.target.value; refresh(); }} />
             </Form.Item>
           )}
           {!xh.xmux.maxConcurrency && (
-            <Form.Item label="Max Connections">
+            <Form.Item label={t('pages.xray.outbound.maxConnections')}>
               <Input value={xh.xmux.maxConnections} onChange={(e) => { xh.xmux.maxConnections = e.target.value; refresh(); }} />
             </Form.Item>
           )}
-          <Form.Item label="Max Reuse Times">
+          <Form.Item label={t('pages.xray.outbound.maxReuseTimes')}>
             <Input value={xh.xmux.cMaxReuseTimes} onChange={(e) => { xh.xmux.cMaxReuseTimes = e.target.value; refresh(); }} />
           </Form.Item>
-          <Form.Item label="Max Request Times">
+          <Form.Item label={t('pages.xray.outbound.maxRequestTimes')}>
             <Input value={xh.xmux.hMaxRequestTimes} onChange={(e) => { xh.xmux.hMaxRequestTimes = e.target.value; refresh(); }} />
           </Form.Item>
-          <Form.Item label="Max Reusable Secs">
+          <Form.Item label={t('pages.xray.outbound.maxReusableSecs')}>
             <Input value={xh.xmux.hMaxReusableSecs} onChange={(e) => { xh.xmux.hMaxReusableSecs = e.target.value; refresh(); }} />
           </Form.Item>
-          <Form.Item label="Keep Alive Period">
+          <Form.Item label={t('pages.xray.outbound.keepAlivePeriod')}>
             <InputNumber
               value={xh.xmux.hKeepAlivePeriod}
               min={0}
@@ -1260,14 +1260,14 @@ function XhttpFields({ ob, refresh, t }: TFieldProps) {
   );
 }
 
-function HysteriaTransportFields({ ob, refresh }: FieldProps) {
+function HysteriaTransportFields({ ob, refresh, t }: TFieldProps) {
   const h = ob.stream.hysteria;
   return (
     <>
-      <Form.Item label="Auth password">
+      <Form.Item label={t('pages.xray.outbound.authPassword')}>
         <Input value={h.auth || ''} onChange={(e) => { h.auth = e.target.value; refresh(); }} />
       </Form.Item>
-      <Form.Item label="Congestion">
+      <Form.Item label={t('pages.xray.outbound.congestion')}>
         <Select
           value={h.congestion || ''}
           onChange={(v) => { h.congestion = v; refresh(); }}
@@ -1277,22 +1277,22 @@ function HysteriaTransportFields({ ob, refresh }: FieldProps) {
           ]}
         />
       </Form.Item>
-      <Form.Item label="Upload">
+      <Form.Item label={t('pages.xray.outbound.upload')}>
         <Input value={h.up} placeholder="100 mbps" onChange={(e) => { h.up = e.target.value; refresh(); }} />
       </Form.Item>
-      <Form.Item label="Download">
+      <Form.Item label={t('pages.xray.outbound.download')}>
         <Input value={h.down} placeholder="100 mbps" onChange={(e) => { h.down = e.target.value; refresh(); }} />
       </Form.Item>
-      <Form.Item label="UDP hop port">
+      <Form.Item label={t('pages.xray.outbound.udpHopPort')}>
         <Input value={h.udphopPort} placeholder="1145-1919" onChange={(e) => { h.udphopPort = e.target.value; refresh(); }} />
       </Form.Item>
-      <Form.Item label="Max idle (s)">
+      <Form.Item label={t('pages.xray.outbound.maxIdleS')}>
         <InputNumber value={h.maxIdleTimeout} min={4} max={120} onChange={(v) => { h.maxIdleTimeout = Number(v) || 0; refresh(); }} />
       </Form.Item>
-      <Form.Item label="Keep alive (s)">
+      <Form.Item label={t('pages.xray.outbound.keepAliveS')}>
         <InputNumber value={h.keepAlivePeriod} min={2} max={60} onChange={(v) => { h.keepAlivePeriod = Number(v) || 0; refresh(); }} />
       </Form.Item>
-      <Form.Item label="Disable Path MTU">
+      <Form.Item label={t('pages.xray.outbound.disablePathMtu')}>
         <Switch checked={!!h.disablePathMTUDiscovery} onChange={(v) => { h.disablePathMTUDiscovery = v; refresh(); }} />
       </Form.Item>
     </>
@@ -1316,17 +1316,17 @@ function TlsFields({ ob, refresh, t }: TFieldProps) {
 
       {ob.stream.isTls && (
         <>
-          <Form.Item label="SNI">
+          <Form.Item label={t('pages.xray.outbound.sni')}>
             <Input value={ob.stream.tls.serverName} placeholder="server name" onChange={(e) => { ob.stream.tls.serverName = e.target.value; refresh(); }} />
           </Form.Item>
-          <Form.Item label="uTLS">
+          <Form.Item label={t('pages.xray.outbound.utls')}>
             <Select
               value={ob.stream.tls.fingerprint || ''}
               onChange={(v) => { ob.stream.tls.fingerprint = v; refresh(); }}
               options={[{ value: '', label: t('none') }, ...UTLS_OPTIONS.map((k) => ({ value: k, label: k }))]}
             />
           </Form.Item>
-          <Form.Item label="ALPN">
+          <Form.Item label={t('pages.xray.outbound.alpn')}>
             <Select
               mode="multiple"
               value={ob.stream.tls.alpn || []}
@@ -1334,13 +1334,13 @@ function TlsFields({ ob, refresh, t }: TFieldProps) {
               options={ALPN_OPTIONS.map((alpn) => ({ value: alpn, label: alpn }))}
             />
           </Form.Item>
-          <Form.Item label="ECH">
+          <Form.Item label={t('pages.xray.outbound.ech')}>
             <Input value={ob.stream.tls.echConfigList} onChange={(e) => { ob.stream.tls.echConfigList = e.target.value; refresh(); }} />
           </Form.Item>
-          <Form.Item label="Verify peer name">
+          <Form.Item label={t('pages.xray.outbound.verifyPeerName')}>
             <Input value={ob.stream.tls.verifyPeerCertByName} placeholder="cloudflare-dns.com" onChange={(e) => { ob.stream.tls.verifyPeerCertByName = e.target.value; refresh(); }} />
           </Form.Item>
-          <Form.Item label="Pinned SHA256">
+          <Form.Item label={t('pages.xray.outbound.pinnedSha256')}>
             <Input value={ob.stream.tls.pinnedPeerCertSha256} placeholder="base64 SHA256" onChange={(e) => { ob.stream.tls.pinnedPeerCertSha256 = e.target.value; refresh(); }} />
           </Form.Item>
         </>
@@ -1348,20 +1348,20 @@ function TlsFields({ ob, refresh, t }: TFieldProps) {
 
       {ob.stream.isReality && (
         <>
-          <Form.Item label="SNI">
+          <Form.Item label={t('pages.xray.outbound.sni')}>
             <Input value={ob.stream.reality.serverName} onChange={(e) => { ob.stream.reality.serverName = e.target.value; refresh(); }} />
           </Form.Item>
-          <Form.Item label="uTLS">
+          <Form.Item label={t('pages.xray.outbound.utls')}>
             <Select
               value={ob.stream.reality.fingerprint}
               onChange={(v) => { ob.stream.reality.fingerprint = v; refresh(); }}
               options={UTLS_OPTIONS.map((k) => ({ value: k, label: k }))}
             />
           </Form.Item>
-          <Form.Item label="Short ID">
+          <Form.Item label={t('pages.xray.outbound.shortId')}>
             <Input value={ob.stream.reality.shortId} onChange={(e) => { ob.stream.reality.shortId = e.target.value; refresh(); }} />
           </Form.Item>
-          <Form.Item label="SpiderX">
+          <Form.Item label={t('pages.xray.outbound.spiderX')}>
             <Input value={ob.stream.reality.spiderX} onChange={(e) => { ob.stream.reality.spiderX = e.target.value; refresh(); }} />
           </Form.Item>
           <Form.Item label={t('pages.inbounds.publicKey')}>
@@ -1371,7 +1371,7 @@ function TlsFields({ ob, refresh, t }: TFieldProps) {
               onChange={(e) => { ob.stream.reality.publicKey = e.target.value; refresh(); }}
             />
           </Form.Item>
-          <Form.Item label="mldsa65 verify">
+          <Form.Item label={t('pages.xray.outbound.mldsa65Verify')}>
             <Input.TextArea
               value={ob.stream.reality.mldsa65Verify}
               autoSize={{ minRows: 2 }}
@@ -1384,48 +1384,48 @@ function TlsFields({ ob, refresh, t }: TFieldProps) {
   );
 }
 
-function SockoptFields({ ob, refresh }: FieldProps) {
+function SockoptFields({ ob, refresh, t }: TFieldProps) {
   return (
     <>
-      <Form.Item label="Sockopts">
+      <Form.Item label={t('pages.xray.outbound.sockopts')}>
         <Switch checked={!!ob.stream.sockoptSwitch} onChange={(v) => { ob.stream.sockoptSwitch = v; refresh(); }} />
       </Form.Item>
       {ob.stream.sockoptSwitch && (
         <>
-          <Form.Item label="Dialer proxy">
+          <Form.Item label={t('pages.xray.outbound.dialerProxy')}>
             <Input value={ob.stream.sockopt.dialerProxy || ''} onChange={(e) => { ob.stream.sockopt.dialerProxy = e.target.value; refresh(); }} />
           </Form.Item>
-          <Form.Item label="Address+Port strategy">
+          <Form.Item label={t('pages.xray.outbound.addressPortStrategy')}>
             <Select
               value={ob.stream.sockopt.addressPortStrategy}
               onChange={(v) => { ob.stream.sockopt.addressPortStrategy = v; refresh(); }}
               options={Object.values(Address_Port_Strategy).map((k) => ({ value: k as string, label: k as string }))}
             />
           </Form.Item>
-          <Form.Item label="Keep alive interval">
+          <Form.Item label={t('pages.xray.outbound.keepAliveInterval')}>
             <InputNumber
               value={ob.stream.sockopt.tcpKeepAliveInterval}
               min={0}
               onChange={(v) => { ob.stream.sockopt.tcpKeepAliveInterval = Number(v) || 0; refresh(); }}
             />
           </Form.Item>
-          <Form.Item label="TCP Fast Open">
+          <Form.Item label={t('pages.xray.outbound.tcpFastOpen')}>
             <Switch checked={!!ob.stream.sockopt.tcpFastOpen} onChange={(v) => { ob.stream.sockopt.tcpFastOpen = v; refresh(); }} />
           </Form.Item>
-          <Form.Item label="Multipath TCP">
+          <Form.Item label={t('pages.xray.outbound.multipathTcp')}>
             <Switch checked={!!ob.stream.sockopt.tcpMptcp} onChange={(v) => { ob.stream.sockopt.tcpMptcp = v; refresh(); }} />
           </Form.Item>
-          <Form.Item label="Penetrate">
+          <Form.Item label={t('pages.xray.outbound.penetrate')}>
             <Switch checked={!!ob.stream.sockopt.penetrate} onChange={(v) => { ob.stream.sockopt.penetrate = v; refresh(); }} />
           </Form.Item>
-          <Form.Item label="Mark (fwmark)">
+          <Form.Item label={t('pages.xray.outbound.fwmark')}>
             <InputNumber
               value={ob.stream.sockopt.mark}
               min={0}
               onChange={(v) => { ob.stream.sockopt.mark = Number(v) || 0; refresh(); }}
             />
           </Form.Item>
-          <Form.Item label="Interface">
+          <Form.Item label={t('pages.xray.outbound.interfaceName')}>
             <Input value={ob.stream.sockopt.interfaceName} onChange={(e) => { ob.stream.sockopt.interfaceName = e.target.value; refresh(); }} />
           </Form.Item>
         </>
@@ -1442,7 +1442,7 @@ function MuxFields({ ob, refresh, t }: TFieldProps) {
       </Form.Item>
       {ob.mux.enabled && (
         <>
-          <Form.Item label="Concurrency">
+          <Form.Item label={t('pages.xray.outbound.concurrency')}>
             <InputNumber
               value={ob.mux.concurrency}
               min={-1}
@@ -1450,7 +1450,7 @@ function MuxFields({ ob, refresh, t }: TFieldProps) {
               onChange={(v) => { ob.mux.concurrency = Number(v) || 0; refresh(); }}
             />
           </Form.Item>
-          <Form.Item label="xudp concurrency">
+          <Form.Item label={t('pages.xray.outbound.xudpConcurrency')}>
             <InputNumber
               value={ob.mux.xudpConcurrency}
               min={-1}
@@ -1458,7 +1458,7 @@ function MuxFields({ ob, refresh, t }: TFieldProps) {
               onChange={(v) => { ob.mux.xudpConcurrency = Number(v) || 0; refresh(); }}
             />
           </Form.Item>
-          <Form.Item label="xudp UDP 443">
+          <Form.Item label={t('pages.xray.outbound.xudpUdp443')}>
             <Select
               value={ob.mux.xudpProxyUDP443}
               onChange={(v) => { ob.mux.xudpProxyUDP443 = v; refresh(); }}

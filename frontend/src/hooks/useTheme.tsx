@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { theme as antdTheme } from 'antd';
+import { theme as antdTheme, message, notification } from 'antd';
 import type { ThemeConfig } from 'antd';
 
 const STORAGE_DARK = 'dark-mode';
@@ -19,8 +19,13 @@ function applyDom(isDark: boolean, isUltra: boolean) {
   } else {
     document.documentElement.removeAttribute('data-theme');
   }
+  document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
   const msg = document.getElementById('message');
   if (msg) msg.className = isDark ? 'dark' : 'light';
+  if (isDark) {
+    message.config({ theme: 'dark' });
+    notification.config({ theme: 'dark' });
+  }
 }
 
 // module load so the document is in the right theme before React mounts.

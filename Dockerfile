@@ -23,6 +23,7 @@ RUN apk --no-cache --update add \
   unzip
 
 COPY . .
+RUN rm -rf web/dist
 COPY --from=frontend /src/web/dist ./web/dist
 
 ENV CGO_ENABLED=1

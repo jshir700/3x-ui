@@ -98,7 +98,10 @@ const subUriPath = computed({
         <template #title>{{ t('pages.settings.subPort') }}</template>
         <template #description>{{ t('pages.settings.subPortDesc') }}</template>
         <template #control>
-          <a-input-number v-model:value="allSetting.subPort" :min="1" :max="65535" :style="{ width: '100%' }" />
+          <div :style="{ width: '100%' }">
+            <a-input-number v-model:value="allSetting.subPort" :min="1" :max="65535" :style="{ width: '100%' }" :disabled="allSetting.subPortLocked" />
+            <p v-if="allSetting.subPortLocked" style="color: #8c8c8c; font-size: 12px; margin: 4px 0 0 0;">{{ t('pages.settings.subPortLockedHint', { port: allSetting.subExternalPort > 0 ? allSetting.subExternalPort : '?' }) }}</p>
+          </div>
         </template>
       </SettingListItem>
 
@@ -127,7 +130,7 @@ const subUriPath = computed({
                   @blur="v => { subUriAddress.value = (subUriAddress.value || '').replace(/^https?:\/\//, '').trim(); }" />
               </a-col>
               <a-col :span="3">
-                <a-input-number v-model:value="subUriPort" :min="1" :max="65535" style="width:100%" :placeholder="t('subPortLabel')" />
+                <a-input-number v-model:value="subUriPort" :min="1" :max="65535" style="width:100%" :placeholder="t('pages.inbounds.port')" />
               </a-col>
               <a-col :span="7">
                 <a-input v-model:value="subUriPath" placeholder="/" />

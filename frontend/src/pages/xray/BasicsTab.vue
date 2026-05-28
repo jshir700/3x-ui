@@ -359,7 +359,7 @@ const localOutboundTestUrl = computed({
         <template #control><a-switch v-model:checked="statsOutboundUplink" /></template>
       </SettingListItem>
       <SettingListItem paddings="small">
-        <template #title>Outbound downlink stats</template>
+        <template #title>{{ t('pages.xray.statsOutboundDownlink') }}</template>
         <template #control><a-switch v-model:checked="statsOutboundDownlink" /></template>
       </SettingListItem>
     </a-collapse-panel>

@@ -1,4 +1,4 @@
-package sub
+﻿package sub
 
 import (
 	_ "embed"
@@ -7,12 +7,11 @@ import (
 	"maps"
 	"strings"
 
-	"github.com/mhsanaei/3x-ui/v3/database/model"
-	"github.com/mhsanaei/3x-ui/v3/logger"
-	"github.com/mhsanaei/3x-ui/v3/util/json_util"
-	"github.com/mhsanaei/3x-ui/v3/util/random"
-	"github.com/mhsanaei/3x-ui/v3/web/service"
-	"github.com/mhsanaei/3x-ui/v3/xray"
+	"github.com/jshir700/3x-ui/v3/database/model"
+	"github.com/jshir700/3x-ui/v3/util/json_util"
+	"github.com/jshir700/3x-ui/v3/util/random"
+	"github.com/jshir700/3x-ui/v3/web/service"
+	"github.com/jshir700/3x-ui/v3/xray"
 )
 
 //go:embed default.json
@@ -90,7 +89,7 @@ func (s *SubJsonService) GetJson(subId string, host string) (string, string, err
 	// Set per-request state on the shared SubService so any
 	// resolveInboundAddress call inside picks node-aware host values.
 	s.SubService.PrepareForRequest(host)
-	inbounds, err := s.SubService.getInboundsBySubId(subId)
+	inbounds, filteredEmails, _, _, sub, err := s.SubService.getInboundsBySubId(subId)
 	if err != nil || len(inbounds) == 0 {
 		return "", "", err
 	}
@@ -101,23 +100,10 @@ func (s *SubJsonService) GetJson(subId string, host string) (string, string, err
 	var configArray []json_util.RawMessage
 
 	seenEmails := make(map[string]struct{})
-	// Prepare Inbounds
-	for _, inbound := range inbounds {
-		clients, err := s.inboundService.GetClients(inbound)
-		if err != nil {
-			logger.Error("SubJsonService - GetClients: Unable to get clients from inbound")
-		}
-		if clients == nil {
-			continue
-		}
-		s.SubService.projectThroughFallbackMaster(inbound)
-
-		for _, client := range clients {
-			if client.SubID == subId {
-				_, clientTraffics = s.SubService.appendUniqueTraffic(seenEmails, clientTraffics, inbound.ClientStats, client.Email)
-				configArray = append(configArray, s.getConfig(inbound, client, host)...)
-			}
-		}
+	pairs := s.SubService.getOrderedPairs(inbounds, filteredEmails, subId, sub)
+	for _, p := range pairs {
+		_, clientTraffics = s.SubService.appendUniqueTraffic(seenEmails, clientTraffics, p.inbound.ClientStats, p.client.Email)
+		configArray = append(configArray, s.getConfig(p.inbound, p.client, host)...)
 	}
 
 	if len(configArray) == 0 {

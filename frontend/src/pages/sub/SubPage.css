@@ -2,7 +2,10 @@
   --bg-page: #e6e8ec;
   --bg-card: #ffffff;
   min-height: 100vh;
+  display: flex;
+  flex-direction: column;
   background: var(--bg-page);
+  overflow-y: auto;
 }
 
 .subscription-page.is-dark {
@@ -21,20 +24,23 @@
 }
 
 .subscription-page .content {
-  padding: 24px 12px;
+  flex: 0 0 auto;
+  margin: 0 auto;
+  width: 100%;
+  max-width: 1200px;
+  padding: 16px 12px;
 }
 
 .subscription-card {
-  margin-top: 8px;
+  margin-top: 0;
 }
 
-.qr-row {
-  margin-bottom: 12px;
-}
-
+/* ---- QR code (side-by-side with info) ---- */
 .qr-col {
   display: flex;
   justify-content: center;
+  align-items: flex-start;
+  padding-top: 8px;
 }
 
 .qr-box {
@@ -42,7 +48,8 @@
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  width: 240px;
+  width: 100%;
+  max-width: 240px;
 }
 
 .qr-tag {
@@ -56,10 +63,18 @@
   padding: 0 !important;
   background: #fff;
   border-radius: 4px;
+  color-scheme: only light;
+  max-width: 100%;
 }
 
+.qr-code canvas {
+  max-width: 100% !important;
+  height: auto !important;
+}
+
+/* ---- Descriptions table ---- */
 .info-table {
-  margin-top: 12px;
+  margin-top: 0;
 }
 
 .info-table .ant-descriptions-view,
@@ -67,6 +82,16 @@
 .info-table .ant-descriptions-view th,
 .info-table .ant-descriptions-view td {
   border-color: rgba(0, 0, 0, 0.18) !important;
+}
+
+.info-table .ant-descriptions-view th,
+.info-table .ant-descriptions-view td {
+  text-align: center !important;
+}
+
+.info-table .ant-descriptions-item-label,
+.info-table .ant-descriptions-item-content {
+  justify-content: center;
 }
 
 .info-table tbody > tr > th,
@@ -96,47 +121,79 @@
   border-bottom: none !important;
 }
 
+.is-dark.is-ultra .info-table .ant-descriptions-view,
+.is-dark.is-ultra .info-table .ant-descriptions-view table,
+.is-dark.is-ultra .info-table .ant-descriptions-view th,
+.is-dark.is-ultra .info-table .ant-descriptions-view td {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+.is-dark.is-ultra .info-table tbody > tr > th,
+.is-dark.is-ultra .info-table tbody > tr > td {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+/* ---- Traffic panel ---- */
+.traffic-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.traffic-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* ---- Announcement ---- */
+.announce-box {
+  margin-top: 12px;
+}
+
+/* ---- Quick actions ---- */
+.quick-actions {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* ---- Config content ---- */
 .links-section {
   margin-top: 16px;
 }
 
-.link-row {
-  position: relative;
-  margin-bottom: 16px;
-  text-align: center;
-}
-
-.link-tag {
-  margin-bottom: -10px;
-  position: relative;
-  z-index: 2;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-}
-
 .link-box {
-  cursor: pointer;
   border-radius: 12px;
-  padding: 22px 18px 14px;
-  margin-top: -10px;
+  padding: 16px;
   word-break: break-all;
   font-size: 13px;
   line-height: 1.5;
-  text-align: left;
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  transition: background 120ms ease, border-color 120ms ease;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.08);
   background: rgba(0, 0, 0, 0.03);
   border: 1px solid rgba(0, 0, 0, 0.08);
-}
-
-.link-box:hover {
-  background: rgba(0, 0, 0, 0.05);
-  border-color: rgba(0, 0, 0, 0.14);
+  position: relative;
 }
 
 .link-copy-icon {
-  margin-right: 6px;
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  cursor: pointer;
   opacity: 0.6;
+}
+
+.link-copy-icon:hover {
+  opacity: 1;
+  color: #4096ff;
+}
+
+.content-pre {
+  white-space: pre-wrap;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  margin: 0;
+  font-size: 12px;
+  cursor: text;
 }
 
 .is-dark .link-box {
@@ -145,11 +202,7 @@
   color: rgba(255, 255, 255, 0.85);
 }
 
-.is-dark .link-box:hover {
-  background: rgba(0, 0, 0, 0.3);
-  border-color: rgba(255, 255, 255, 0.2);
-}
-
+/* ---- App buttons ---- */
 .apps-row {
   margin-top: 24px;
 }
@@ -158,10 +211,7 @@
   text-align: center;
 }
 
-.settings-popover {
-  min-width: 220px;
-}
-
+/* ---- Theme cycle button ---- */
 .theme-cycle {
   width: 32px;
   height: 32px;
