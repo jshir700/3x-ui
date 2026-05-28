@@ -99,6 +99,8 @@ func TestAPIRoutesDocumented(t *testing.T) {
 			basePath = "/panel/xray"
 		case "custom_geo.go":
 			basePath = "/panel/api/custom-geo"
+		case "subscription.go":
+			basePath = "/panel/api/subscription"
 		case "websocket.go":
 			basePath = ""
 		}
@@ -132,6 +134,7 @@ func TestAPIRoutesDocumented(t *testing.T) {
 			"/panel/clients": true,
 			"/panel/nodes":   true, "/panel/settings": true,
 			"/panel/xray": true, "/panel/api-docs": true,
+			"/panel/subscription": true,
 		}
 		if spaPages[r.Path] {
 			continue

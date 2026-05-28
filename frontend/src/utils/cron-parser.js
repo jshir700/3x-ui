@@ -31,7 +31,7 @@ function describeCron(s, m, h, dom, mon, dow, t) {
 
   if (mon !== '*' && mon !== '?') {
     const toM = (mo) => MONTHS[Number(mo) - 1] || `${mo}`;
-    let monDesc = '';
+    let monDesc;
     if (mon.includes(',')) {
       monDesc = mon.split(',').map(mo => toM(mo)).join(t('cComma'));
     } else if (mon.includes('-')) {

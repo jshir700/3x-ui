@@ -151,6 +151,7 @@ func TestCheckPortConflict_TCPCollidesWithTCP(t *testing.T) {
 	svc := &InboundService{}
 	other := &model.Inbound{
 		Tag:            "vless-443-b",
+		Enable:         true,
 		Listen:         "0.0.0.0",
 		Port:           443,
 		Protocol:       model.Trojan,
@@ -174,6 +175,7 @@ func TestCheckPortConflict_UDPCollidesWithUDP(t *testing.T) {
 	svc := &InboundService{}
 	wg := &model.Inbound{
 		Tag:      "wg-443",
+		Enable:   true,
 		Listen:   "0.0.0.0",
 		Port:     443,
 		Protocol: model.WireGuard,
@@ -197,6 +199,7 @@ func TestCheckPortConflict_ShadowsocksDualListenBlocksBoth(t *testing.T) {
 
 	tcpClash := &model.Inbound{
 		Tag:            "vless-443",
+		Enable:         true,
 		Listen:         "0.0.0.0",
 		Port:           443,
 		Protocol:       model.VLESS,
@@ -208,6 +211,7 @@ func TestCheckPortConflict_ShadowsocksDualListenBlocksBoth(t *testing.T) {
 
 	udpClash := &model.Inbound{
 		Tag:      "hyst2-443",
+		Enable:   true,
 		Listen:   "0.0.0.0",
 		Port:     443,
 		Protocol: model.Hysteria2,
@@ -259,6 +263,7 @@ func TestCheckPortConflict_ListenOverlapPreserved(t *testing.T) {
 	// any-address vs specific on same transport: conflict (any-addr wins).
 	anyAddr := &model.Inbound{
 		Tag:            "vless-any",
+		Enable:         true,
 		Listen:         "0.0.0.0",
 		Port:           443,
 		Protocol:       model.VLESS,
@@ -377,6 +382,7 @@ func TestCheckPortConflict_NodeScope(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			candidate := &model.Inbound{
+				Enable:         true,
 				Listen:         "0.0.0.0",
 				Port:           443,
 				Protocol:       model.VLESS,

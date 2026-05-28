@@ -449,7 +449,7 @@ export default function InboundList({
   const pointerDrag = useRef({ started: false, startY: 0, _record: null as DBInboundRecord | null });
 
   function enterReorder() {
-    let items = [...dbInbounds];
+    const items = [...dbInbounds];
     if (sortKey && sortOrder && SORT_FNS[sortKey]) {
       const ctx = { nodesById, clientCount };
       items.sort((a, b) => SORT_FNS[sortKey!](a, b, ctx));

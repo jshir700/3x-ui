@@ -178,6 +178,57 @@ export const sections = [
         body: '{\n  "fallbacks": [\n    { "childId": 11, "path": "/vlws", "xver": 2 },\n    { "childId": 12, "alpn": "h2" }\n  ]\n}',
         response: '{\n  "success": true,\n  "msg": "Inbound updated"\n}',
       },
+      {
+        method: 'GET',
+        path: '/panel/api/inbounds/checkSubscriptions/:id',
+        summary: 'Check subscription validity for all clients in one inbound. Returns expiry status, traffic quota usage, and remaining days for each client.',
+        params: [
+          { name: 'id', in: 'path', type: 'number', desc: 'Inbound ID.' },
+        ],
+      },
+      {
+        method: 'GET',
+        path: '/panel/api/inbounds/checkClients/:id',
+        summary: 'Check online status for all clients in one inbound. Returns active connection counts and per-client state.',
+        params: [
+          { name: 'id', in: 'path', type: 'number', desc: 'Inbound ID.' },
+        ],
+      },
+      {
+        method: 'GET',
+        path: '/panel/api/inbounds/checkClientSubscriptions',
+        summary: 'Check subscription validity for all clients across all inbounds. Returns a consolidated view of expiry and quota status.',
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/inbounds/forceDel/:id',
+        summary: 'Force-delete an inbound by ID, bypassing the soft-delete tombstone guard.',
+        params: [
+          { name: 'id', in: 'path', type: 'number', desc: 'Inbound ID.' },
+        ],
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/inbounds/:id/forceDelClient/:clientId',
+        summary: 'Force-delete a specific client from an inbound by client ID, bypassing the soft-delete tombstone guard.',
+        params: [
+          { name: 'id', in: 'path', type: 'number', desc: 'Inbound ID.' },
+          { name: 'clientId', in: 'path', type: 'string', desc: 'Client email or ID.' },
+        ],
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/inbounds/reorder',
+        summary: 'Persist a new display order for the inbounds table.',
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/inbounds/:id/clients/reorder',
+        summary: 'Persist a new display order for the clients table within one inbound.',
+        params: [
+          { name: 'id', in: 'path', type: 'number', desc: 'Inbound ID.' },
+        ],
+      },
     ],
   },
 
@@ -538,6 +589,24 @@ export const sections = [
       },
       {
         method: 'GET',
+        path: '/panel/api/clients/checkSubscriptions',
+        summary: 'Return subscription validity checks for all clients. Used to detect stale or broken subscription links before they affect end users.',
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/clients/forceDel/:email',
+        summary: 'Force-delete a client by email, bypassing the soft-delete tombstone guard. Only for recovery scenarios.',
+        params: [
+          { name: 'email', in: 'path', type: 'string', desc: 'Client email.' },
+        ],
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/clients/reorder',
+        summary: 'Persist a new display order for the clients table. Body is an array of client emails in the desired sequence.',
+      },
+      {
+        method: 'GET',
         path: '/panel/api/clients/traffic/:email',
         summary: 'Traffic counters for a client identified by email.',
         params: [
@@ -634,6 +703,22 @@ export const sections = [
         method: 'POST',
         path: '/panel/api/nodes/probe/:id',
         summary: 'Probe an existing node, updating its cached health state.',
+        params: [
+          { name: 'id', in: 'path', type: 'number', desc: 'Node ID.' },
+        ],
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/nodes/fetchSettings/:id',
+        summary: 'Fetch the full settings JSON from a remote node. Used by the central panel to pull configuration from a managed node.',
+        params: [
+          { name: 'id', in: 'path', type: 'number', desc: 'Node ID.' },
+        ],
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/nodes/pushSettings/:id',
+        summary: 'Push a settings JSON payload to a remote node, updating its configuration.',
         params: [
           { name: 'id', in: 'path', type: 'number', desc: 'Node ID.' },
         ],
@@ -890,6 +975,60 @@ export const sections = [
           { name: 'mode', in: 'body (form)', type: 'string', desc: '"tcp" for a fast dial-only probe (parallel-safe). Default/empty uses a full HTTP probe through a temp xray instance.' },
         ],
         body: 'outbound={"protocol":"freedom","settings":{}}&mode=tcp',
+      },
+    ],
+  },
+
+  {
+    id: 'subscription-api',
+    title: 'Subscription API',
+    description:
+      'Manage subscription records that group inbounds into named configurations with format, traffic, and expiry settings. All endpoints under /panel/api/subscription.',
+    endpoints: [
+      {
+        method: 'GET',
+        path: '/panel/api/subscription/list',
+        summary: 'List all subscription records with their format, traffic limits, expiry, and linked inbound IDs.',
+      },
+      {
+        method: 'GET',
+        path: '/panel/api/subscription/get/:id',
+        summary: 'Fetch a single subscription record by ID.',
+        params: [
+          { name: 'id', in: 'path', type: 'number', desc: 'Subscription ID.' },
+        ],
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/subscription/add',
+        summary: 'Create a new subscription record. Body includes format, title, inbound IDs, traffic limits, and expiry.',
+        body:
+          '{\n  "format": "base64",\n  "title": "My Sub",\n  "inbounds": [1, 2, 3],\n  "total": 0,\n  "expiryTime": 0,\n  "enable": true\n}',
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/subscription/update/:id',
+        summary: 'Replace a subscription record. Same body shape as /add.',
+        params: [
+          { name: 'id', in: 'path', type: 'number', desc: 'Subscription ID.' },
+        ],
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/subscription/del/:id',
+        summary: 'Delete a subscription record. Does not delete the linked inbounds.',
+        params: [
+          { name: 'id', in: 'path', type: 'number', desc: 'Subscription ID.' },
+        ],
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/subscription/setEnable/:id',
+        summary: 'Toggle only the enable flag on a subscription record.',
+        params: [
+          { name: 'id', in: 'path', type: 'number', desc: 'Subscription ID.' },
+        ],
+        body: '{\n  "enable": false\n}',
       },
     ],
   },
