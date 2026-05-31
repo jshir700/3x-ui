@@ -10,8 +10,9 @@ import {
 
 import { useTheme } from '@/hooks/useTheme';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
-import { useNodes } from '@/hooks/useNodes';
-import type { NodeRecord } from '@/hooks/useNodes';
+import { useNodesQuery } from '@/api/queries/useNodesQuery';
+import { useNodeMutations } from '@/api/queries/useNodeMutations';
+import type { NodeRecord } from '@/api/queries/useNodesQuery';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import AppSidebar from '@/components/AppSidebar';
 import CustomStatistic from '@/components/CustomStatistic';

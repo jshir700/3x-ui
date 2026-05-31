@@ -15,7 +15,7 @@ import {
   Tabs,
   message,
 } from 'antd';
-import type { NodeRecord } from '@/hooks/useNodes';
+import type { NodeRecord } from '@/api/queries/useNodesQuery';
 import { HttpUtil, LanguageManager } from '@/utils';
 import './NodeFormModal.css';
 

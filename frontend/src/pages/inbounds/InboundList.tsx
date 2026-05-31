@@ -51,7 +51,7 @@ import { DBInbound, coerceInboundJsonField } from '@/models/dbinbound.js';
 import { Inbound } from '@/models/inbound.js';
 import InfinityIcon from '@/components/InfinityIcon';
 import { useDatepicker } from '@/hooks/useDatepicker';
-import type { NodeRecord } from '@/hooks/useNodes';
+import type { NodeRecord } from '@/api/queries/useNodesQuery';
 import './InboundList.css';
 
 type ProtocolFlags = {
