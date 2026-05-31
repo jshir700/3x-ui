@@ -701,7 +701,7 @@ func (s *SubService) genShadowsocksLink(inbound *model.Inbound, email string) st
 }
 
 func (s *SubService) genHysteriaLink(inbound *model.Inbound, email string) string {
-	if !model.IsHysteria(inbound.Protocol) {
+	if inbound.Protocol != model.Hysteria {
 		return ""
 	}
 	var stream map[string]any

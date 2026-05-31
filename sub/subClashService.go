@@ -160,7 +160,7 @@ func (s *SubClashService) buildProxy(inbound *model.Inbound, client model.Client
 	// Hysteria has its own transport + TLS model, applyTransport /
 	// applySecurity don't fit. IsHysteria also covers the literal
 	// "hysteria2" protocol string (#4081).
-	if model.IsHysteria(inbound.Protocol) {
+	if inbound.Protocol == model.Hysteria {
 		return s.buildHysteriaProxy(inbound, client, extraRemark)
 	}
 

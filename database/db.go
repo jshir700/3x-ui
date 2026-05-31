@@ -1,4 +1,4 @@
-﻿// Package database provides database initialization, migration, and management utilities
+// Package database provides database initialization, migration, and management utilities
 // for the 3x-ui panel using GORM with SQLite or PostgreSQL.
 package database
 
@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"math"
 	"os"
 	"path"
 	"slices"
@@ -66,6 +67,7 @@ func initModels() error {
 		&model.CustomGeoResource{},
 		&model.Node{},
 		&model.ApiToken{},
+		&model.ClientGroup{},
 		&model.Subscription{},
 		&model.ClientRecord{},
 		&model.ClientInbound{},
@@ -508,4 +510,103 @@ func ValidateSQLiteDB(dbPath string) error {
 		return errors.New("sqlite integrity check failed: " + res)
 	}
 	return nil
+}
+
+func normalizeInboundClientTgId() error {
+	var inbounds []model.Inbound
+	if err := db.Find(&inbounds).Error; err != nil {
+		return err
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, inbound := range inbounds {
+			if strings.TrimSpace(inbound.Settings) == "" {
+				continue
+			}
+			var settings map[string]any
+			if err := json.Unmarshal([]byte(inbound.Settings), &settings); err != nil {
+				log.Printf("InboundClientTgIdFix: skip inbound %d (invalid settings json): %v", inbound.Id, err)
+				continue
+			}
+			clients, ok := settings["clients"].([]any)
+			if !ok {
+				continue
+			}
+			mutated := false
+			for i, raw := range clients {
+				obj, ok := raw.(map[string]any)
+				if !ok {
+					continue
+				}
+				tgRaw, present := obj["tgId"]
+				if !present {
+					continue
+				}
+				v, isFloat := tgRaw.(float64)
+				if isFloat && !math.IsNaN(v) && !math.IsInf(v, 0) && v == math.Trunc(v) {
+					continue
+				}
+				obj["tgId"] = int64(0)
+				clients[i] = obj
+				mutated = true
+			}
+			if !mutated {
+				continue
+			}
+			settings["clients"] = clients
+			newSettings, err := json.MarshalIndent(settings, "", "  ")
+			if err != nil {
+				log.Printf("InboundClientTgIdFix: skip inbound %d (marshal failed): %v", inbound.Id, err)
+				continue
+			}
+			if err := tx.Model(&model.Inbound{}).Where("id = ?", inbound.Id).
+				Update("settings", string(newSettings)).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Create(&model.HistoryOfSeeders{SeederName: "InboundClientTgIdFix"}).Error
+	})
+}
+
+func normalizeInboundClientsArray() error {
+	var inbounds []model.Inbound
+	if err := db.Find(&inbounds).Error; err != nil {
+		return err
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, inbound := range inbounds {
+			if strings.TrimSpace(inbound.Settings) == "" {
+				continue
+			}
+			var settings map[string]any
+			if err := json.Unmarshal([]byte(inbound.Settings), &settings); err != nil {
+				log.Printf("InboundClientsArrayFix: skip inbound %d (invalid settings json): %v", inbound.Id, err)
+				continue
+			}
+			clients, ok := settings["clients"]
+			if ok && clients == nil {
+				settings["clients"] = []any{}
+				newSettings, err := json.MarshalIndent(settings, "", "  ")
+				if err != nil {
+					log.Printf("InboundClientsArrayFix: skip inbound %d (marshal failed): %v", inbound.Id, err)
+					continue
+				}
+				if err := tx.Model(&model.Inbound{}).Where("id = ?", inbound.Id).
+					Update("settings", string(newSettings)).Error; err != nil {
+					return err
+				}
+			}
+		}
+		return tx.Create(&model.HistoryOfSeeders{SeederName: "InboundClientsArrayFix"}).Error
+	})
+}
+
+func envInt(key string, def int) int {
+	if s := strings.TrimSpace(os.Getenv(key)); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 {
+			return n
+		}
+	}
+	return def
 }
