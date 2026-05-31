@@ -83,6 +83,7 @@ func (a *InboundController) initRouter(g *gin.RouterGroup) {
 	g.POST("/:id/forceDelClient/:clientId", a.forceDelInboundClient)
 	g.POST("/reorder", a.reorderInbounds)
 	g.POST("/:id/clients/reorder", a.reorderClients)
+	g.POST("/:id/delAllClients", a.delAllInboundClients)
 }
 
 // getInbounds retrieves the list of inbounds for the logged-in user.
@@ -440,6 +441,38 @@ func (a *InboundController) setFallbacks(c *gin.Context) {
 
 // reorderInbounds receives an ordered list of inbound IDs and updates
 // their sort_order so the list display follows the user's manual order.
+
+// delAllInboundClients removes every client attached to a specific inbound
+// and broadcasts the delete to connected peers.
+func (a *InboundController) delAllInboundClients(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	emails, err := a.inboundService.EmailsByInbound(id)
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	if len(emails) == 0 {
+		jsonObj(c, service.BulkDeleteResult{}, nil)
+		return
+	}
+	result, needRestart, err := a.clientService.BulkDelete(&a.inboundService, emails, false)
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	jsonObj(c, result, nil)
+	if needRestart {
+		a.xrayService.SetToNeedRestart()
+	}
+	user := session.GetLoginUser(c)
+	a.broadcastInboundsUpdate(user.Id)
+	notifyClientsChanged()
+}
+
 func (a *InboundController) reorderInbounds(c *gin.Context) {
 	var body struct {
 		Ids []int `json:"ids"`
