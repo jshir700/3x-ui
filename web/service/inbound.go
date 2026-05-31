@@ -727,11 +727,11 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 	// Normalize streamSettings based on protocol
 	s.normalizeStreamSettings(inbound)
 
-	exist, err := s.checkPortConflict(inbound, 0)
+	conflicts, err := s.checkPortConflict(inbound, 0)
 	if err != nil {
 		return inbound, false, err
 	}
-	if exist {
+	if len(conflicts) > 0 {
 		return inbound, false, common.NewError("Port already exists:", inbound.Port)
 	}
 
@@ -949,12 +949,16 @@ func (s *InboundService) SetInboundEnable(id int, enable bool) (bool, error) {
 	// otherwise checkPortConflict short-circuits on !inbound.Enable.
 	if enable {
 		inbound.Enable = true
-		conflict, err := s.checkPortConflict(inbound, id)
+		conflicts, err := s.checkPortConflict(inbound, id)
 		if err != nil {
 			return false, err
 		}
-		if conflict {
-			return false, s.portConflictErr(inbound.Port, id)
+		if len(conflicts) > 0 {
+			parts := make([]string, len(conflicts))
+			for i, d := range conflicts {
+				parts[i] = d.String()
+			}
+			return false, common.NewError(strings.Join(parts, "; "))
 		}
 	}
 
@@ -1012,11 +1016,11 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 	// Normalize streamSettings based on protocol
 	s.normalizeStreamSettings(inbound)
 
-	exist, err := s.checkPortConflict(inbound, inbound.Id)
+	conflicts, err := s.checkPortConflict(inbound, inbound.Id)
 	if err != nil {
 		return inbound, false, err
 	}
-	if exist {
+	if len(conflicts) > 0 {
 		return inbound, false, common.NewError("Port already exists:", inbound.Port)
 	}
 
