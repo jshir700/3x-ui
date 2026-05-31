@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { HttpUtil } from '@/utils';
-import { DBInbound } from '@/models/dbinbound.js';
-import { Protocols } from '@/models/inbound.js';
+import { DBInbound } from '@/models/dbinbound';
+import { Protocols } from '@/schemas/primitives';
 import { setDatepicker } from '@/hooks/useDatepicker';
 
 export interface SubSettings {
