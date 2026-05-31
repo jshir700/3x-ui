@@ -11,7 +11,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 
 import { HttpUtil, SizeFormatter, IntlUtil } from '@/utils';
-import { TLS_FLOW_CONTROL } from '@/models/inbound.js';
+import { TLS_FLOW_CONTROL } from '@/schemas/primitives';
 
 const FLOW_OPTIONS = Object.values(TLS_FLOW_CONTROL) as string[];
 

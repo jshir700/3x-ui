@@ -34,7 +34,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 
 import { SizeFormatter } from '@/utils';
-import { Protocols } from '@/models/outbound.js';
+import { OutboundProtocols } from '@/schemas/primitives';
 import OutboundFormModal from './OutboundFormModal';
 import type { XraySettingsValue, SetTemplate, OutboundTestState, OutboundTrafficRow } from '@/hooks/useXraySetting';
 import './OutboundsTab.css';
@@ -65,25 +65,25 @@ interface OutboundRow {
 function outboundAddresses(o: OutboundRow): string[] {
   const settings = o.settings as Record<string, unknown> | undefined;
   switch (o.protocol) {
-    case Protocols.VMess: {
+    case OutboundProtocols.VMess: {
       const serverObj = settings?.vnext as Array<{ address: string; port: number }> | undefined;
       return serverObj ? serverObj.map((s) => `${s.address}:${s.port}`) : [];
     }
-    case Protocols.VLESS:
+    case OutboundProtocols.VLESS:
       return [`${settings?.address || ''}:${settings?.port || ''}`];
-    case Protocols.HTTP:
-    case Protocols.Socks:
-    case Protocols.Shadowsocks:
-    case Protocols.Trojan: {
+    case OutboundProtocols.HTTP:
+    case OutboundProtocols.Socks:
+    case OutboundProtocols.Shadowsocks:
+    case OutboundProtocols.Trojan: {
       const serverObj = settings?.servers as Array<{ address: string; port: number }> | undefined;
       return serverObj ? serverObj.map((s) => `${s.address}:${s.port}`) : [];
     }
-    case Protocols.DNS: {
+    case OutboundProtocols.DNS: {
       const addr = (settings?.rewriteAddress as string) || (settings?.address as string) || '';
       const port = (settings?.rewritePort as string | number) || (settings?.port as string | number) || '';
       return addr || port ? [`${addr}:${port}`] : [];
     }
-    case Protocols.Wireguard:
+    case OutboundProtocols.Wireguard:
       return (((settings?.peers as Array<{ endpoint?: string }>) || []).map((p) => p.endpoint || '').filter(Boolean));
     default:
       return [];
@@ -92,8 +92,8 @@ function outboundAddresses(o: OutboundRow): string[] {
 
 function isUntestable(o: OutboundRow, mode: string): boolean {
   if (!o) return true;
-  if (o.protocol === Protocols.Blackhole || o.protocol === Protocols.Loopback || o.tag === 'blocked') return true;
-  if (mode === 'tcp' && (o.protocol === Protocols.Freedom || o.protocol === Protocols.DNS)) return true;
+  if (o.protocol === OutboundProtocols.Blackhole || o.protocol === OutboundProtocols.Loopback || o.tag === 'blocked') return true;
+  if (mode === 'tcp' && (o.protocol === OutboundProtocols.Freedom || o.protocol === OutboundProtocols.DNS)) return true;
   return false;
 }
 
@@ -268,7 +268,7 @@ export default function OutboundsTab({
             </Tooltip>
             <div className="protocol-line">
               <Tag color="green">{record.protocol}</Tag>
-              {[Protocols.VMess, Protocols.VLESS, Protocols.Trojan, Protocols.Shadowsocks].includes(record.protocol as never) && (
+              {[OutboundProtocols.VMess, OutboundProtocols.VLESS, OutboundProtocols.Trojan, OutboundProtocols.Shadowsocks].includes(record.protocol as never) && (
                 <>
                   <Tag>{record.streamSettings?.network}</Tag>
                   {showSecurity(record.streamSettings?.security) && <Tag color="purple">{record.streamSettings?.security}</Tag>}
@@ -438,7 +438,7 @@ export default function OutboundsTab({
                       <span className="tag-name">{record.tag}</span>
                     </Tooltip>
                     <Tag color="green">{record.protocol}</Tag>
-                    {[Protocols.VMess, Protocols.VLESS, Protocols.Trojan, Protocols.Shadowsocks].includes(record.protocol as never) && (
+                    {[OutboundProtocols.VMess, OutboundProtocols.VLESS, OutboundProtocols.Trojan, OutboundProtocols.Shadowsocks].includes(record.protocol as never) && (
                       <>
                         <Tag>{record.streamSettings?.network}</Tag>
                         {showSecurity(record.streamSettings?.security) && <Tag color="purple">{record.streamSettings?.security}</Tag>}

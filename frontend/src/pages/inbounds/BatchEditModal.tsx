@@ -17,7 +17,7 @@ import {
 
 import DateTimePicker from '@/components/DateTimePicker';
 import { HttpUtil } from '@/utils';
-import { Protocols, TLS_FLOW_CONTROL } from '@/models/inbound.js';
+import { Protocols, TLS_FLOW_CONTROL } from '@/schemas/primitives';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 
