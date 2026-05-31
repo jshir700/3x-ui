@@ -626,7 +626,7 @@ func (a *InboundController) forceDelInboundClient(c *gin.Context) {
 	if email := a.inboundService.GetClientEmail(id, clientId); email != "" {
 		_, _, _ = a.subscriptionService.RemoveClientFromSubscriptions(email)
 	}
-	needRestart, err := a.clientService.DelInboundClient(&a.inboundService, id, clientId)
+	needRestart, err := a.clientService.DelInboundClient(&a.inboundService, id, clientId, false)
 	if err != nil {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
