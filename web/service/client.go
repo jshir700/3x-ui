@@ -70,7 +70,7 @@ func clientKeyForProtocol(p model.Protocol, rec *model.ClientRecord) string {
 		return rec.Password
 	case model.Shadowsocks:
 		return rec.Email
-	case model.Hysteria, model.Hysteria2:
+	case model.Hysteria:
 		return rec.Auth
 	default:
 		return rec.UUID
@@ -476,7 +476,7 @@ func (s *ClientService) fillProtocolDefaults(c *model.Client, ib *model.Inbound)
 		if c.Password == "" || !validShadowsocksClientKey(method, c.Password) {
 			c.Password = randomShadowsocksClientKey(method)
 		}
-	case model.Hysteria, model.Hysteria2:
+	case model.Hysteria:
 		if c.Auth == "" {
 			c.Auth = strings.ReplaceAll(uuid.NewString(), "-", "")
 		}

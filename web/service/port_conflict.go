@@ -36,7 +36,7 @@ func (b transportBits) conflicts(o transportBits) bool { return b&o != 0 }
 func inboundTransports(protocol model.Protocol, streamSettings, settings string) transportBits {
 	// protocols that ignore streamSettings entirely.
 	switch protocol {
-	case model.Hysteria, model.Hysteria2, model.WireGuard:
+	case model.Hysteria, model.WireGuard:
 		return transportUDP
 	}
 

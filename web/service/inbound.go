@@ -712,7 +712,7 @@ func (s *InboundService) normalizeStreamSettings(inbound *model.Inbound) {
 		model.Trojan:      true,
 		model.Shadowsocks: true,
 		model.Hysteria:    true,
-		model.Hysteria2:   true,
+		model.Hysteria:    true,
 	}
 
 	if !protocolsWithStream[inbound.Protocol] {
