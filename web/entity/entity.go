@@ -23,17 +23,18 @@ type AllSetting struct {
 	// Web server settings
 	WebListen         string `json:"webListen" form:"webListen"`                 // Web server listen IP address
 	WebDomain         string `json:"webDomain" form:"webDomain"`                 // Web server domain for domain validation
-	WebPort           int    `json:"webPort" form:"webPort"`                     // Web server port number
+	WebPort           int    `json:"webPort" form:"webPort" validate:"gte=1,lte=65535"`                // Web server port number
 	WebCertFile       string `json:"webCertFile" form:"webCertFile"`             // Path to SSL certificate file for web server
 	WebKeyFile        string `json:"webKeyFile" form:"webKeyFile"`               // Path to SSL private key file for web server
 	WebBasePath       string `json:"webBasePath" form:"webBasePath"`             // Base path for web panel URLs
-	SessionMaxAge     int    `json:"sessionMaxAge" form:"sessionMaxAge"`         // Session maximum age in minutes
+	SessionMaxAge     int    `json:"sessionMaxAge" form:"sessionMaxAge" validate:"gte=0,lte=525600"`   // Session maximum age in minutes (cap at one year)
 	TrustedProxyCIDRs string `json:"trustedProxyCIDRs" form:"trustedProxyCIDRs"` // Trusted reverse proxy IPs/CIDRs for forwarded headers
+	PanelProxy        string `json:"panelProxy" form:"panelProxy"`               // Proxy URL for the panel's own outbound requests (GitHub/Telegram)
 
 	// UI settings
-	PageSize    int    `json:"pageSize" form:"pageSize"`       // Number of items per page in lists
-	ExpireDiff  int    `json:"expireDiff" form:"expireDiff"`   // Expiration warning threshold in days
-	TrafficDiff int    `json:"trafficDiff" form:"trafficDiff"` // Traffic warning threshold percentage
+	PageSize    int    `json:"pageSize" form:"pageSize" validate:"gte=1,lte=1000"`     // Number of items per page in lists
+	ExpireDiff  int    `json:"expireDiff" form:"expireDiff" validate:"gte=0"`          // Expiration warning threshold in days
+	TrafficDiff int    `json:"trafficDiff" form:"trafficDiff" validate:"gte=0,lte=100"`// Traffic warning threshold percentage
 	RemarkModel string `json:"remarkModel" form:"remarkModel"` // Remark model pattern for inbounds
 	Datepicker  string `json:"datepicker" form:"datepicker"`   // Date picker format
 
@@ -46,7 +47,7 @@ type AllSetting struct {
 	TgRunTime        string `json:"tgRunTime" form:"tgRunTime"`               // Cron schedule for Telegram notifications
 	TgBotBackup      bool   `json:"tgBotBackup" form:"tgBotBackup"`           // Enable database backup via Telegram
 	TgBotLoginNotify bool   `json:"tgBotLoginNotify" form:"tgBotLoginNotify"` // Send login notifications
-	TgCpu            int    `json:"tgCpu" form:"tgCpu"`                       // CPU usage threshold for alerts
+	TgCpu            int    `json:"tgCpu" form:"tgCpu" validate:"gte=0,lte=100"`          // CPU usage threshold for alerts (percent)
 	TgLang           string `json:"tgLang" form:"tgLang"`                     // Telegram bot language
 
 	// Security settings
@@ -64,12 +65,12 @@ type AllSetting struct {
 	SubEnableRouting            bool   `json:"subEnableRouting" form:"subEnableRouting"`                       // Enable routing for subscription
 	SubRoutingRules             string `json:"subRoutingRules" form:"subRoutingRules"`                         // Subscription global routing rules (Only for Happ)
 	SubListen                   string `json:"subListen" form:"subListen"`                                     // Subscription server listen IP
-	SubPort                     int    `json:"subPort" form:"subPort"`                                         // Subscription server port
+	SubPort                     int    `json:"subPort" form:"subPort" validate:"gte=1,lte=65535"`              // Subscription server port
 	SubPath                     string `json:"subPath" form:"subPath"`                                         // Base path for subscription URLs
 	SubDomain                   string `json:"subDomain" form:"subDomain"`                                     // Domain for subscription server validation
 	SubCertFile                 string `json:"subCertFile" form:"subCertFile"`                                 // SSL certificate file for subscription server
 	SubKeyFile                  string `json:"subKeyFile" form:"subKeyFile"`                                   // SSL private key file for subscription server
-	SubUpdates                  int    `json:"subUpdates" form:"subUpdates"`                                   // Subscription update interval in minutes
+	SubUpdates                  int    `json:"subUpdates" form:"subUpdates" validate:"gte=0,lte=525600"`       // Subscription update interval in minutes
 	ExternalTrafficInformEnable bool   `json:"externalTrafficInformEnable" form:"externalTrafficInformEnable"` // Enable external traffic reporting
 	ExternalTrafficInformURI    string `json:"externalTrafficInformURI" form:"externalTrafficInformURI"`       // URI for external traffic reporting
 	RestartXrayOnClientDisable  bool   `json:"restartXrayOnClientDisable" form:"restartXrayOnClientDisable"`   // Restart Xray when clients are auto-disabled by expiry/traffic limit
@@ -114,9 +115,9 @@ type AllSetting struct {
 	LdapInboundTags       string `json:"ldapInboundTags" form:"ldapInboundTags"`
 	LdapAutoCreate        bool   `json:"ldapAutoCreate" form:"ldapAutoCreate"`
 	LdapAutoDelete        bool   `json:"ldapAutoDelete" form:"ldapAutoDelete"`
-	LdapDefaultTotalGB    int    `json:"ldapDefaultTotalGB" form:"ldapDefaultTotalGB"`
-	LdapDefaultExpiryDays int    `json:"ldapDefaultExpiryDays" form:"ldapDefaultExpiryDays"`
-	LdapDefaultLimitIP    int    `json:"ldapDefaultLimitIP" form:"ldapDefaultLimitIP"`
+	LdapDefaultTotalGB    int    `json:"ldapDefaultTotalGB" form:"ldapDefaultTotalGB" validate:"gte=0"`
+	LdapDefaultExpiryDays int    `json:"ldapDefaultExpiryDays" form:"ldapDefaultExpiryDays" validate:"gte=0"`
+	LdapDefaultLimitIP    int    `json:"ldapDefaultLimitIP" form:"ldapDefaultLimitIP" validate:"gte=0"`
 	// JSON subscription routing rules
 }
 
