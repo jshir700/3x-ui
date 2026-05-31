@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"reflect"
 	"strconv"
@@ -16,6 +17,7 @@ import (
 	"github.com/jshir700/3x-ui/v3/database/model"
 	"github.com/jshir700/3x-ui/v3/logger"
 	"github.com/jshir700/3x-ui/v3/util/common"
+	"github.com/jshir700/3x-ui/v3/util/netproxy"
 	"github.com/jshir700/3x-ui/v3/util/random"
 	"github.com/jshir700/3x-ui/v3/util/reflect_util"
 	"github.com/jshir700/3x-ui/v3/web/entity"
@@ -119,6 +121,8 @@ var defaultValueMap = map[string]string{
 	"ldapDefaultTotalGB":    "0",
 	"ldapDefaultExpiryDays": "0",
 	"ldapDefaultLimitIP":    "0",
+
+	"panelProxy": "",
 }
 
 // SettingService provides business logic for application settings management.
@@ -402,6 +406,31 @@ func (s *SettingService) SetTgBotToken(token string) error {
 
 func (s *SettingService) GetTgBotProxy() (string, error) {
 	return s.getString("tgBotProxy")
+}
+
+func (s *SettingService) GetPanelProxy() (string, error) {
+	return s.getString("panelProxy")
+}
+
+func (s *SettingService) SetPanelProxy(proxyUrl string) error {
+	return s.setString("panelProxy", proxyUrl)
+}
+
+// NewProxiedHTTPClient returns an HTTP client that routes the panel's own
+// outbound requests through the configured panelProxy setting. An invalid or
+// missing proxy falls back to a direct client so existing behavior is preserved.
+func (s *SettingService) NewProxiedHTTPClient(timeout time.Duration) *http.Client {
+	proxyUrl, err := s.GetPanelProxy()
+	if err != nil {
+		logger.Warning("Failed to read panel proxy setting:", err)
+		proxyUrl = ""
+	}
+	client, err := netproxy.NewHTTPClient(proxyUrl, timeout)
+	if err != nil {
+		logger.Warningf("Invalid panel proxy %q, using direct connection: %v", proxyUrl, err)
+		return &http.Client{Timeout: timeout}
+	}
+	return client
 }
 
 func (s *SettingService) SetTgBotProxy(token string) error {
