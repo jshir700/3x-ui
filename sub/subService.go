@@ -368,16 +368,6 @@ func (s *SubService) isClientActive(client model.Client, stats []xray.ClientTraf
 	return true
 }
 
-// isClientDepleted checks whether a client has exhausted its traffic quota
-// based on the stored per-client traffic record (inbound.ClientStats).
-func (s *SubService) isClientDepleted(client model.Client, stats []xray.ClientTraffic) bool {
-	if client.TotalGB <= 0 {
-		return false
-	}
-	ct := s.getClientTraffics(stats, client.Email)
-	return ct.Up+ct.Down >= client.TotalGB*gb
-}
-
 // projectThroughFallbackMaster mutates the inbound in place so its
 // Listen/Port/StreamSettings reflect the externally reachable master
 // when applicable. Covers both fallback mechanisms:

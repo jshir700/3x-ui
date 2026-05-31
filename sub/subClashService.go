@@ -1,4 +1,4 @@
-﻿package sub
+package sub
 
 import (
 	"fmt"
@@ -98,12 +98,6 @@ func (s *SubClashService) GetClash(subId string, host string) (string, string, e
 
 	header := fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", traffic.Up, traffic.Down, traffic.Total, traffic.ExpiryTime/1000)
 	return string(finalYAML), header, nil
-}
-
-// GetClashForClient generates Clash proxy entries for a single inbound+client.
-func (s *SubClashService) GetClashForClient(inbound *model.Inbound, client model.Client, host string) []map[string]any {
-	s.SubService.PrepareForRequest(host)
-	return s.getProxies(inbound, client, host)
 }
 
 func (s *SubClashService) getProxies(inbound *model.Inbound, client model.Client, host string) []map[string]any {
