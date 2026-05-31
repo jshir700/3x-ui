@@ -396,6 +396,24 @@ func (s *InboundService) ReorderInbounds(ids []int) error {
 	return tx.Commit().Error
 }
 
+func (s *InboundService) EmailsByInbound(inboundId int) ([]string, error) {
+	inbound, err := s.GetInbound(inboundId)
+	if err != nil {
+		return nil, err
+	}
+	clients, err := s.GetClients(inbound)
+	if err != nil {
+		return nil, err
+	}
+	emails := make([]string, 0, len(clients))
+	for _, c := range clients {
+		if e := strings.TrimSpace(c.Email); e != "" {
+			emails = append(emails, e)
+		}
+	}
+	return emails, nil
+}
+
 // ReorderClients updates the sort_order of clients within an inbound's settings JSON
 // to match the given email order. emails that are not found are ignored.
 func (s *InboundService) ReorderClients(inboundId int, emails []string) error {
