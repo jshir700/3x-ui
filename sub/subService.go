@@ -218,7 +218,7 @@ func (s *SubService) getInboundsBySubId(subId string) ([]*model.Inbound, map[str
 		JOIN client_inbounds ON client_inbounds.inbound_id = inbounds.id
 		JOIN clients ON clients.id = client_inbounds.client_id
 		WHERE
-			inbounds.protocol in ('vmess','vless','trojan','shadowsocks','hysteria','hysteria2')
+			inbounds.protocol in ('vmess','vless','trojan','shadowsocks','hysteria')
 			AND clients.sub_id = ? AND inbounds.enable = ?
 			AND (inbounds.expiry_time = 0 OR inbounds.expiry_time > ?)
 			AND (inbounds.total = 0 OR (inbounds.up + inbounds.down) < inbounds.total)
@@ -265,7 +265,7 @@ func (s *SubService) getInboundsBySubId(subId string) ([]*model.Inbound, map[str
 			JOIN client_inbounds ON client_inbounds.inbound_id = inbounds.id
 			JOIN clients ON clients.id = client_inbounds.client_id
 			WHERE
-				inbounds.protocol in ('vmess','vless','trojan','shadowsocks','hysteria','hysteria2')
+				inbounds.protocol in ('vmess','vless','trojan','shadowsocks','hysteria')
 				AND clients.email IN ? AND inbounds.enable = ?
 				AND (inbounds.expiry_time = 0 OR inbounds.expiry_time > ?)
 				AND (inbounds.total = 0 OR (inbounds.up + inbounds.down) < inbounds.total)
