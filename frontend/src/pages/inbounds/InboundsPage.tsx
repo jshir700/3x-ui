@@ -24,7 +24,7 @@ import {
 import { setMessageInstance } from '@/utils/messageBus';
 import { HttpUtil, SizeFormatter, RandomUtil, checkInboundPortConflict } from '@/utils';
 import { Inbound } from '@/models/inbound.js';
-import { coerceInboundJsonField } from '@/models/dbinbound.js';
+import { coerceInboundJsonField } from '@/models/dbinbound';
 import { useTheme } from '@/hooks/useTheme';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useWebSocket } from '@/hooks/useWebSocket';

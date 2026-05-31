@@ -47,7 +47,7 @@ import {
 } from '@ant-design/icons';
 
 import { HttpUtil, ObjectUtil, SizeFormatter, IntlUtil, ColorUtils } from '@/utils';
-import { DBInbound, coerceInboundJsonField } from '@/models/dbinbound.js';
+import { DBInbound, coerceInboundJsonField } from '@/models/dbinbound';
 import { Inbound } from '@/models/inbound.js';
 import InfinityIcon from '@/components/InfinityIcon';
 import { useDatepicker } from '@/hooks/useDatepicker';

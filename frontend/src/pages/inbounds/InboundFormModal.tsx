@@ -43,8 +43,8 @@ import {
 } from '@/utils';
 import InputAddon from '@/components/InputAddon';
 import { getRandomRealityTarget } from '@/models/reality-targets';
+import { Inbound } from '@/models/inbound.js';
 import {
-  Inbound,
   Protocols,
   SSMethods,
   SNIFFING_OPTION,
@@ -56,8 +56,8 @@ import {
   DOMAIN_STRATEGY_OPTION,
   TCP_CONGESTION_OPTION,
   MODE_OPTION,
-} from '@/models/inbound.js';
-import { DBInbound } from '@/models/dbinbound.js';
+} from '@/schemas/primitives';
+import { DBInbound } from '@/models/dbinbound';
 import FinalMaskForm from '@/components/FinalMaskForm';
 import DateTimePicker from '@/components/DateTimePicker';
 import JsonEditor from '@/components/JsonEditor';
