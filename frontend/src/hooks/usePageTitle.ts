@@ -11,6 +11,7 @@ const TITLE_KEYS: Record<string, string> = {
   '/settings': 'menu.settings',
   '/xray': 'menu.xray',
   '/api-docs': 'menu.apiDocs',
+  '/subscription': 'menu.subscription',
 };
 
 export function usePageTitle() {

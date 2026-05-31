@@ -11,6 +11,7 @@ const NodesPage = lazy(() => import('@/pages/nodes/NodesPage'));
 const SettingsPage = lazy(() => import('@/pages/settings/SettingsPage'));
 const XrayPage = lazy(() => import('@/pages/xray/XrayPage'));
 const ApiDocsPage = lazy(() => import('@/pages/api-docs/ApiDocsPage'));
+const SubscriptionAdminPage = lazy(() => import('@/pages/subscription/SubscriptionAdminPage'));
 
 function withSuspense(node: React.ReactNode) {
   return <Suspense fallback={null}>{node}</Suspense>;
@@ -25,6 +26,7 @@ const routes: RouteObject[] = [
       { path: 'inbounds', element: withSuspense(<InboundsPage />) },
       { path: 'clients', element: withSuspense(<ClientsPage />) },
       { path: 'groups', element: withSuspense(<GroupsPage />) },
+      { path: 'subscription', element: withSuspense(<SubscriptionAdminPage />) },
       { path: 'nodes', element: withSuspense(<NodesPage />) },
       { path: 'settings', element: withSuspense(<SettingsPage />) },
       { path: 'xray', element: withSuspense(<XrayPage />) },
