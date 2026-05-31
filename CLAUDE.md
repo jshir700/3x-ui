@@ -1,5 +1,17 @@
 ﻿# 3x-ui Development Guide
 
+## Merge Upstream Rule
+
+When working on merging upstream changes into this fork, **every step must strictly follow MERGE_PLAN.md**. Before making any merge-related change, locate the corresponding File/phase/step in MERGE_PLAN.md and follow it exactly. If the plan does not cover a specific operation, stop and ask the user — never improvise.
+
+**Before touching any file during merge:** Read that file's full section in MERGE_PLAN.md first. Each File has its own chapter with:
+1. Upstream changes
+2. Fork changes
+3. Per-diff decisions (✅ keep / ❌ discard / 🔀 merge)
+4. Execution steps
+
+Execute only what the plan explicitly decides. If anything is unclear, ask the user.
+
 ## Project Overview
 
 3x-ui is an Xray panel with a Go backend (Gin framework) and a Vue 3 frontend (Vite + Ant Design Vue). The subscription module serves proxy configurations at `/sub/{subId}` URLs.
