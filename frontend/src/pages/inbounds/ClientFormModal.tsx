@@ -21,7 +21,8 @@ import {
 
 import DateTimePicker from '@/components/DateTimePicker';
 import { HttpUtil, RandomUtil, SizeFormatter, ColorUtils } from '@/utils';
-import { Inbound, Protocols, USERS_SECURITY, TLS_FLOW_CONTROL } from '@/models/inbound.js';
+import { Inbound } from '@/models/inbound.js';
+import { Protocols, USERS_SECURITY, TLS_FLOW_CONTROL } from '@/schemas/primitives';
 import type { Dayjs } from 'dayjs';
 
 const SECURITY_OPTIONS = Object.values(USERS_SECURITY) as string[];
